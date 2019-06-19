@@ -12,7 +12,9 @@ import (
 	"sync"
 	"time"
 
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/runner-mei/errors"
+	"github.com/runner-mei/resty/tracing"
 )
 
 const (
@@ -82,6 +84,7 @@ func New(urlStr string) (*Proxy, error) {
 }
 
 type Proxy struct {
+	Tracer        opentracing.Tracer
 	Client        *http.Client
 	TimeFormat    string
 	jsonUseNumber bool
@@ -102,6 +105,7 @@ func (px *Proxy) Clone() *Proxy {
 	}
 
 	return &Proxy{
+		Tracer:      px.Tracer,
 		Client:      px.Client,
 		TimeFormat:  px.TimeFormat,
 		u:           px.u,
@@ -150,6 +154,7 @@ func (proxy *Proxy) Release(request *Request) {}
 
 func (proxy *Proxy) New(urlStr string) *Request {
 	r := &Request{
+		tracer:        proxy.Tracer,
 		proxy:         proxy,
 		jsonUseNumber: proxy.jsonUseNumber,
 		u:             proxy.u,
@@ -185,6 +190,7 @@ func (proxy *Proxy) New(urlStr string) *Request {
 }
 
 type Request struct {
+	tracer        opentracing.Tracer
 	proxy         *Proxy
 	jsonUseNumber bool
 	u             url.URL
@@ -195,6 +201,10 @@ type Request struct {
 	responseBody  interface{}
 }
 
+func (r *Request) SetTracer(tracer opentracing.Tracer) *Request {
+	r.tracer = tracer
+	return r
+}
 func (r *Request) JSONUseNumber() *Request {
 	r.jsonUseNumber = true
 	return r
@@ -289,6 +299,15 @@ func (r *Request) invoke(ctx context.Context, method string) error {
 	if e != nil {
 		return WithHTTPCode(http.StatusBadRequest, e)
 	}
+
+	var ht *tracing.Tracer
+	if r.tracer != nil {
+		ctx, req, ht = tracing.TraceRequest(ctx, r.tracer, req)
+		defer ht.Finish()
+
+		ht.Start(req)
+	}
+
 	if ctx != nil {
 		req = req.WithContext(ctx)
 	}
@@ -300,9 +319,14 @@ func (r *Request) invoke(ctx context.Context, method string) error {
 	if client == nil {
 		client = http.DefaultClient
 	}
+
 	resp, e := client.Do(req)
 	if e != nil {
 		return WithHTTPCode(http.StatusServiceUnavailable, e)
+	}
+
+	if ht != nil {
+		ht.Stop(resp)
 	}
 
 	isOK := false
