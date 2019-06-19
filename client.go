@@ -61,6 +61,8 @@ func init() {
 	}
 }
 
+type URLFunc func(u *url.URL) error
+
 type ResponseFunc func(req *http.Request, resp *http.Response) error
 
 func New(urlStr string) (*Proxy, error) {
@@ -88,6 +90,7 @@ type Proxy struct {
 	Client        *http.Client
 	TimeFormat    string
 	jsonUseNumber bool
+	urlFor        URLFunc
 	u             url.URL
 	queryParams   url.Values
 	headers       url.Values
@@ -108,6 +111,7 @@ func (px *Proxy) Clone() *Proxy {
 		Tracer:      px.Tracer,
 		Client:      px.Client,
 		TimeFormat:  px.TimeFormat,
+		urlFor:      px.urlFor,
 		u:           px.u,
 		queryParams: queryParams,
 		headers:     headers,
@@ -125,8 +129,16 @@ func (px *Proxy) JoinURL(urlStr string) *Proxy {
 	copyed.u.Path = Join(px.u.Path, u.Path)
 	return copyed
 }
+func (px *Proxy) SetTracer(tracer opentracing.Tracer) *Proxy {
+	px.Tracer = tracer
+	return px
+}
 func (px *Proxy) JSONUseNumber() *Proxy {
 	px.jsonUseNumber = true
+	return px
+}
+func (px *Proxy) SetURLFor(cb URLFunc) *Proxy {
+	px.urlFor = cb
 	return px
 }
 func (px *Proxy) SetHeader(key, value string) *Proxy {
@@ -157,6 +169,7 @@ func (proxy *Proxy) New(urlStr string) *Request {
 		tracer:        proxy.Tracer,
 		proxy:         proxy,
 		jsonUseNumber: proxy.jsonUseNumber,
+		urlFor:        proxy.urlFor,
 		u:             proxy.u,
 		queryParams:   url.Values{},
 		headers:       url.Values{},
@@ -193,6 +206,7 @@ type Request struct {
 	tracer        opentracing.Tracer
 	proxy         *Proxy
 	jsonUseNumber bool
+	urlFor        URLFunc
 	u             url.URL
 	queryParams   url.Values
 	headers       url.Values
@@ -206,6 +220,7 @@ func (r *Request) Clone() *Request {
 		tracer:        r.tracer,
 		proxy:         r.proxy,
 		jsonUseNumber: r.jsonUseNumber,
+		urlFor:        r.urlFor,
 		u:             r.u,
 		queryParams:   url.Values{},
 		headers:       url.Values{},
@@ -235,6 +250,10 @@ func (r *Request) Clone() *Request {
 }
 func (r *Request) SetTracer(tracer opentracing.Tracer) *Request {
 	r.tracer = tracer
+	return r
+}
+func (r *Request) SetURLFor(cb URLFunc) *Request {
+	r.urlFor = cb
 	return r
 }
 func (r *Request) JSONUseNumber() *Request {
@@ -322,6 +341,12 @@ func (r *Request) invoke(ctx context.Context, method string) error {
 				buffer.Reset()
 				BufferPool.Put(buffer)
 			}()
+		}
+	}
+
+	if r.urlFor != nil {
+		if err := r.urlFor(&r.u); err != nil {
+			return errors.Wrap(err, "url_for")
 		}
 	}
 
