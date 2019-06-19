@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 
-	"github.com/opentracing/opentracing-go"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"
 	"github.com/opentracing/opentracing-go/log"
 )
@@ -100,6 +100,7 @@ func ClientSpanObserver(f func(span opentracing.Span, r *http.Request)) ClientOp
 // 		req, ht := nethttp.TraceRequest(tracer, req)
 // 		defer ht.Finish()
 //
+//      req = req.WithContext(ContextWithTracer(req.Context(), ht))
 // 		res, err := client.Do(req)
 // 		if err != nil {
 // 			return err
@@ -116,9 +117,12 @@ func TraceRequest(ctx context.Context, tr opentracing.Tracer, req *http.Request,
 	}
 	ht := &Tracer{tr: tr, opts: opts}
 	if !opts.disableClientTrace {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		ctx = httptrace.WithClientTrace(ctx, ht.clientTrace())
 	}
-	return context.WithValue(ctx, keyTracer, ht), req, ht
+	return ctx, req, ht
 }
 
 type closeTracker struct {
@@ -131,6 +135,10 @@ func (c closeTracker) Close() error {
 	c.sp.LogFields(log.String("event", "ClosedBody"))
 	c.sp.Finish()
 	return err
+}
+
+func ContextWithTracer(ctx context.Context, ht *Tracer) context.Context {
+	return context.WithValue(ctx, keyTracer, ht)
 }
 
 // TracerFromRequest retrieves the Tracer from the request. If the request does

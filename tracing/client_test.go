@@ -19,8 +19,7 @@ func makeRequest(t *testing.T, url string, options ...ClientOption) []*mocktrace
 		t.Fatal(err)
 	}
 	ctx, req, ht := TraceRequest(opentracing.ContextWithSpan(req.Context(), span), tr, req, options...)
-
-	req = req.WithContext(ctx)
+	req = req.WithContext(ContextWithTracer(ctx, ht))
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +179,7 @@ func TestInjectSpanContext(t *testing.T) {
 			}
 
 			ctx, req, ht := TraceRequest(opentracing.ContextWithSpan(req.Context(), span), tr, req, tt.opts...)
-			req = req.WithContext(ctx)
+			req = req.WithContext(ContextWithTracer(ctx, ht))
 
 			client := &http.Client{Transport: &Transport{}}
 			resp, err := client.Do(req)

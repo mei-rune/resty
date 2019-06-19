@@ -311,6 +311,7 @@ func (r *Request) invoke(ctx context.Context, method string) error {
 	if ctx != nil {
 		req = req.WithContext(ctx)
 	}
+
 	for key, values := range r.headers {
 		req.Header[key] = values
 	}
