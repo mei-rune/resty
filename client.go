@@ -201,6 +201,38 @@ type Request struct {
 	responseBody  interface{}
 }
 
+func (r *Request) Clone() *Request {
+	copyed := &Request{
+		tracer:        r.tracer,
+		proxy:         r.proxy,
+		jsonUseNumber: r.jsonUseNumber,
+		u:             r.u,
+		queryParams:   url.Values{},
+		headers:       url.Values{},
+		requestBody:   r.requestBody,
+		exceptedCode:  r.exceptedCode,
+		responseBody:  nil,
+	}
+
+	if copyed.u.User != nil {
+		user := copyed.u.User.Username()
+		pwd, isSet := copyed.u.User.Password()
+
+		if isSet {
+			copyed.u.User = url.UserPassword(user, pwd)
+		} else {
+			copyed.u.User = url.User(user)
+		}
+	}
+
+	for key, values := range r.queryParams {
+		copyed.queryParams[key] = values
+	}
+	for key, values := range r.headers {
+		copyed.headers[key] = values
+	}
+	return copyed
+}
 func (r *Request) SetTracer(tracer opentracing.Tracer) *Request {
 	r.tracer = tracer
 	return r
