@@ -117,17 +117,9 @@ func (px *Proxy) Clone() *Proxy {
 		headers:     headers,
 	}
 }
-func (px *Proxy) JoinURL(urlStr string) *Proxy {
-	copyed := px.Clone()
-	u, err := url.Parse(urlStr)
-	if err != nil {
-		panic(err)
-	}
-	for key, value := range u.Query() {
-		copyed.queryParams[key] = value
-	}
-	copyed.u.Path = Join(px.u.Path, u.Path)
-	return copyed
+func (px *Proxy) JoinURL(urlStr ...string) *Proxy {
+	px.u.Path = JoinWith(px.u.Path, urlStr)
+	return px
 }
 func (px *Proxy) SetTracer(tracer opentracing.Tracer) *Proxy {
 	px.Tracer = tracer
@@ -164,7 +156,7 @@ func (px *Proxy) SetContentType(contentType string) *Proxy {
 
 func (proxy *Proxy) Release(request *Request) {}
 
-func (proxy *Proxy) New(urlStr string) *Request {
+func (proxy *Proxy) New(urlStr ...string) *Request {
 	r := &Request{
 		tracer:        proxy.Tracer,
 		proxy:         proxy,
@@ -182,23 +174,7 @@ func (proxy *Proxy) New(urlStr string) *Request {
 		r.headers[key] = values
 	}
 
-	if urlStr != "" {
-		u, err := url.Parse(urlStr)
-		if err != nil {
-			panic(err)
-		}
-
-		if u.Scheme != "" {
-			r.u = *u
-		} else {
-			r.u.Path = Join(r.u.Path, u.Path)
-		}
-
-		for key, values := range u.Query() {
-			r.queryParams[key] = values
-		}
-	}
-
+	r.u.Path = JoinWith(r.u.Path, urlStr)
 	return r
 }
 
@@ -247,6 +223,29 @@ func (r *Request) Clone() *Request {
 		copyed.headers[key] = values
 	}
 	return copyed
+}
+func (r *Request) SetURL(urlStr string) *Request {
+	if urlStr != "" {
+		u, err := url.Parse(urlStr)
+		if err != nil {
+			panic(err)
+		}
+
+		if u.Scheme != "" {
+			r.u = *u
+		} else {
+			r.u.Path = Join(r.u.Path, u.Path)
+		}
+
+		for key, values := range u.Query() {
+			r.queryParams[key] = values
+		}
+	}
+	return r
+}
+func (r *Request) JoinURL(urlStr ...string) *Request {
+	r.u.Path = JoinWith(r.u.Path, urlStr)
+	return r
 }
 func (r *Request) SetTracer(tracer opentracing.Tracer) *Request {
 	r.tracer = tracer
