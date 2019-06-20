@@ -243,6 +243,9 @@ func (r *Request) SetURL(urlStr string) *Request {
 	}
 	return r
 }
+func (r *Request) RequestURL() string {
+	return r.u.String()
+}
 func (r *Request) JoinURL(urlStr ...string) *Request {
 	r.u.Path = JoinWith(r.u.Path, urlStr)
 	return r
