@@ -63,6 +63,8 @@ func init() {
 
 type URLFunc func(u *url.URL) error
 
+type AuthFunc func(context.Context, *Request, bool) (string, string, error)
+
 type ResponseFunc func(req *http.Request, resp *http.Response) error
 
 func New(urlStr string) (*Proxy, error) {
@@ -90,6 +92,7 @@ type Proxy struct {
 	Client        *http.Client
 	TimeFormat    string
 	jsonUseNumber bool
+	authWith      AuthFunc
 	urlFor        URLFunc
 	u             url.URL
 	queryParams   url.Values
@@ -111,6 +114,7 @@ func (px *Proxy) Clone() *Proxy {
 		Tracer:      px.Tracer,
 		Client:      px.Client,
 		TimeFormat:  px.TimeFormat,
+		authWith:    px.authWith,
 		urlFor:      px.urlFor,
 		u:           px.u,
 		queryParams: queryParams,
@@ -131,6 +135,10 @@ func (px *Proxy) JSONUseNumber() *Proxy {
 }
 func (px *Proxy) SetURLFor(cb URLFunc) *Proxy {
 	px.urlFor = cb
+	return px
+}
+func (px *Proxy) AuthWith(authWith AuthFunc) *Proxy {
+	px.authWith = authWith
 	return px
 }
 func (px *Proxy) SetHeader(key, value string) *Proxy {
@@ -161,6 +169,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 		tracer:        proxy.Tracer,
 		proxy:         proxy,
 		jsonUseNumber: proxy.jsonUseNumber,
+		authWith:      proxy.authWith,
 		urlFor:        proxy.urlFor,
 		u:             proxy.u,
 		queryParams:   url.Values{},
@@ -182,6 +191,7 @@ type Request struct {
 	tracer        opentracing.Tracer
 	proxy         *Proxy
 	jsonUseNumber bool
+	authWith      AuthFunc
 	urlFor        URLFunc
 	u             url.URL
 	queryParams   url.Values
@@ -196,6 +206,7 @@ func (r *Request) Clone() *Request {
 		tracer:        r.tracer,
 		proxy:         r.proxy,
 		jsonUseNumber: r.jsonUseNumber,
+		authWith:      r.authWith,
 		urlFor:        r.urlFor,
 		u:             r.u,
 		queryParams:   url.Values{},
@@ -241,6 +252,10 @@ func (r *Request) SetURL(urlStr string) *Request {
 			r.queryParams[key] = values
 		}
 	}
+	return r
+}
+func (r *Request) AuthWith(authWith AuthFunc) *Request {
+	r.authWith = authWith
 	return r
 }
 func (r *Request) RequestURL() string {
@@ -291,35 +306,61 @@ func (r *Request) ExceptedCode(code int) *Request {
 	return r
 }
 func (r *Request) GET(ctx context.Context) error {
-	return r.invoke(ctx, "GET")
+	return r.invokeWithAuth(ctx, "GET")
 }
 func (r *Request) POST(ctx context.Context) error {
-	return r.invoke(ctx, "POST")
+	return r.invokeWithAuth(ctx, "POST")
 }
 func (r *Request) PUT(ctx context.Context) error {
-	return r.invoke(ctx, "PUT")
+	return r.invokeWithAuth(ctx, "PUT")
 }
 func (r *Request) CONNECT(ctx context.Context) error {
-	return r.invoke(ctx, "CONNECT")
+	return r.invokeWithAuth(ctx, "CONNECT")
 }
 func (r *Request) DELETE(ctx context.Context) error {
-	return r.invoke(ctx, "DELETE")
+	return r.invokeWithAuth(ctx, "DELETE")
 }
 func (r *Request) HEAD(ctx context.Context) error {
-	return r.invoke(ctx, "HEAD")
+	return r.invokeWithAuth(ctx, "HEAD")
 }
 func (r *Request) OPTIONS(ctx context.Context) error {
-	return r.invoke(ctx, "OPTIONS")
+	return r.invokeWithAuth(ctx, "OPTIONS")
 }
 func (r *Request) PATCH(ctx context.Context) error {
-	return r.invoke(ctx, "PATCH")
+	return r.invokeWithAuth(ctx, "PATCH")
 }
 func (r *Request) TRACE(ctx context.Context) error {
-	return r.invoke(ctx, "TRACE")
+	return r.invokeWithAuth(ctx, "TRACE")
 }
 func (r *Request) Do(ctx context.Context, method string) error {
+	return r.invokeWithAuth(ctx, method)
+}
+
+func (r *Request) invokeWithAuth(ctx context.Context, method string) error {
+	if r.authWith == nil {
+		return r.invoke(ctx, method)
+	}
+
+	key, value, err := r.authWith(ctx, r, false)
+	if err != nil {
+		return err
+	}
+	r = r.SetParam(key, value)
+
+	err = r.invoke(ctx, method)
+	if err == nil || !errors.IsUnauthorizedError(err) {
+		return nil
+	}
+
+	key, value, err = r.authWith(ctx, r, true)
+	if err != nil {
+		return err
+	}
+	r = r.SetParam(key, value)
+
 	return r.invoke(ctx, method)
 }
+
 func (r *Request) invoke(ctx context.Context, method string) error {
 	var req *http.Request
 
