@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,7 +44,9 @@ const (
 	MIMEMultipartForm                    = "multipart/form-data"
 	MIMEOctetStream                      = "application/octet-stream"
 
-	HeaderContentType = "Content-Type"
+	HeaderContentType   = "Content-Type"
+	HeaderXForwardedFor = "X-Forwarded-For"
+	HeaderXRealIP       = "X-Real-IP"
 )
 
 type HTTPError = errors.HTTPError
@@ -53,19 +56,61 @@ var ErrBadArgument = errors.ErrBadArgument
 var WithHTTPCode = errors.WithHTTPCode
 var Wrap = errors.Wrap
 
-var BufferPool sync.Pool
+var DefaultPool = &PooledBuffers{}
 
 func init() {
-	BufferPool.New = func() interface{} {
+	DefaultPool.Pool.New = func() interface{} {
 		return bytes.NewBuffer(make([]byte, 0, 1024))
 	}
+}
+
+type MemoryPool interface {
+	Get() *bytes.Buffer
+	Put(*bytes.Buffer)
+}
+
+type PooledBuffers struct {
+	Pool sync.Pool
+}
+
+func (pool *PooledBuffers) Get() *bytes.Buffer {
+	return pool.Pool.Get().(*bytes.Buffer)
+}
+
+func (pool *PooledBuffers) Put(b *bytes.Buffer) {
+	b.Reset()
+	pool.Pool.Put(b)
 }
 
 type URLFunc func(u *url.URL) error
 
 type AuthFunc func(context.Context, *Request, bool) (string, string, error)
 
-type ResponseFunc func(req *http.Request, resp *http.Response) error
+type ResponseFunc func(context.Context, *http.Request, *http.Response) HTTPError
+
+func Unmarshal(result interface{}, cached *bytes.Buffer) ResponseFunc {
+	return ResponseFunc(func(ctx context.Context, req *http.Request, resp *http.Response) HTTPError {
+		if cached == nil {
+			cached = DefaultPool.Get()
+			defer DefaultPool.Put(cached)
+		} else {
+			cached.Reset()
+		}
+
+		_, e := io.Copy(cached, resp.Body)
+		if e != nil {
+			return WithHTTPCode(11, Wrap(e, "request '"+req.Method+"' is ok and read response fail"))
+		}
+
+		e = json.Unmarshal(cached.Bytes(), result)
+		if e != nil {
+			return WithHTTPCode(12, Wrap(e, "request '"+req.Method+"' is ok and unmarshal response fail\r\n"+
+				cached.String()))
+		}
+
+		return nil
+	})
+}
 
 func New(urlStr string) (*Proxy, error) {
 	u, err := url.Parse(urlStr)
@@ -79,6 +124,7 @@ func New(urlStr string) (*Proxy, error) {
 	u.RawQuery = ""
 
 	return &Proxy{
+		MemoryPool:  DefaultPool,
 		Client:      http.DefaultClient,
 		TimeFormat:  TimeFormat,
 		u:           *u,
@@ -89,6 +135,7 @@ func New(urlStr string) (*Proxy, error) {
 
 type Proxy struct {
 	Tracer        opentracing.Tracer
+	MemoryPool    MemoryPool
 	Client        *http.Client
 	TimeFormat    string
 	jsonUseNumber bool
@@ -112,6 +159,7 @@ func (px *Proxy) Clone() *Proxy {
 
 	return &Proxy{
 		Tracer:      px.Tracer,
+		MemoryPool:  px.MemoryPool,
 		Client:      px.Client,
 		TimeFormat:  px.TimeFormat,
 		authWith:    px.authWith,
@@ -168,6 +216,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 	r := &Request{
 		tracer:        proxy.Tracer,
 		proxy:         proxy,
+		memoryPool:    proxy.MemoryPool,
 		jsonUseNumber: proxy.jsonUseNumber,
 		authWith:      proxy.authWith,
 		urlFor:        proxy.urlFor,
@@ -190,6 +239,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 type Request struct {
 	tracer        opentracing.Tracer
 	proxy         *Proxy
+	memoryPool    MemoryPool
 	jsonUseNumber bool
 	authWith      AuthFunc
 	urlFor        URLFunc
@@ -205,6 +255,7 @@ func (r *Request) Clone() *Request {
 	copyed := &Request{
 		tracer:        r.tracer,
 		proxy:         r.proxy,
+		memoryPool:    r.memoryPool,
 		jsonUseNumber: r.jsonUseNumber,
 		authWith:      r.authWith,
 		urlFor:        r.urlFor,
@@ -234,6 +285,10 @@ func (r *Request) Clone() *Request {
 		copyed.headers[key] = values
 	}
 	return copyed
+}
+func (r *Request) SetMemoryPool(pool MemoryPool) *Request {
+	r.memoryPool = pool
+	return r
 }
 func (r *Request) SetURL(urlStr string) *Request {
 	if urlStr != "" {
@@ -305,63 +360,73 @@ func (r *Request) ExceptedCode(code int) *Request {
 	r.exceptedCode = code
 	return r
 }
-func (r *Request) GET(ctx context.Context) error {
+func (r *Request) GET(ctx context.Context) HTTPError {
 	return r.invokeWithAuth(ctx, "GET")
 }
-func (r *Request) POST(ctx context.Context) error {
+func (r *Request) POST(ctx context.Context) HTTPError {
 	return r.invokeWithAuth(ctx, "POST")
 }
-func (r *Request) PUT(ctx context.Context) error {
+func (r *Request) PUT(ctx context.Context) HTTPError {
 	return r.invokeWithAuth(ctx, "PUT")
 }
-func (r *Request) CONNECT(ctx context.Context) error {
+func (r *Request) CONNECT(ctx context.Context) HTTPError {
 	return r.invokeWithAuth(ctx, "CONNECT")
 }
-func (r *Request) DELETE(ctx context.Context) error {
+func (r *Request) DELETE(ctx context.Context) HTTPError {
 	return r.invokeWithAuth(ctx, "DELETE")
 }
-func (r *Request) HEAD(ctx context.Context) error {
+func (r *Request) HEAD(ctx context.Context) HTTPError {
 	return r.invokeWithAuth(ctx, "HEAD")
 }
-func (r *Request) OPTIONS(ctx context.Context) error {
+func (r *Request) OPTIONS(ctx context.Context) HTTPError {
 	return r.invokeWithAuth(ctx, "OPTIONS")
 }
-func (r *Request) PATCH(ctx context.Context) error {
+func (r *Request) PATCH(ctx context.Context) HTTPError {
 	return r.invokeWithAuth(ctx, "PATCH")
 }
-func (r *Request) TRACE(ctx context.Context) error {
+func (r *Request) TRACE(ctx context.Context) HTTPError {
 	return r.invokeWithAuth(ctx, "TRACE")
 }
-func (r *Request) Do(ctx context.Context, method string) error {
+func (r *Request) Do(ctx context.Context, method string) HTTPError {
 	return r.invokeWithAuth(ctx, method)
 }
 
-func (r *Request) invokeWithAuth(ctx context.Context, method string) error {
+func isUnauthorized(err HTTPError) bool {
+	return err.HTTPCode() == http.StatusUnauthorized
+}
+
+func (r *Request) invokeWithAuth(ctx context.Context, method string) HTTPError {
 	if r.authWith == nil {
 		return r.invoke(ctx, method)
 	}
 
-	key, value, err := r.authWith(ctx, r, false)
-	if err != nil {
-		return err
+	key, value, e := r.authWith(ctx, r, false)
+	if e != nil {
+		if he, ok := e.(HTTPError); ok {
+			return he
+		}
+		return WithHTTPCode(11, errors.Wrap(e, "url_for"))
 	}
 	r = r.SetParam(key, value)
 
-	err = r.invoke(ctx, method)
-	if err == nil || !errors.IsUnauthorizedError(err) {
-		return nil
+	err := r.invoke(ctx, method)
+	if err == nil || !isUnauthorized(err) {
+		return err
 	}
 
-	key, value, err = r.authWith(ctx, r, true)
-	if err != nil {
-		return err
+	key, value, e = r.authWith(ctx, r, true)
+	if e != nil {
+		if he, ok := e.(HTTPError); ok {
+			return he
+		}
+		return WithHTTPCode(11, e)
 	}
 	r = r.SetParam(key, value)
 
 	return r.invoke(ctx, method)
 }
 
-func (r *Request) invoke(ctx context.Context, method string) error {
+func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 	var req *http.Request
 
 	var body io.Reader
@@ -374,22 +439,21 @@ func (r *Request) invoke(ctx context.Context, method string) error {
 		case io.Reader:
 			body = value
 		default:
-			buffer := BufferPool.Get().(*bytes.Buffer)
+			buffer := r.memoryPool.Get()
 			e := json.NewEncoder(buffer).Encode(r.requestBody)
 			if e != nil {
 				return WithHTTPCode(http.StatusBadRequest, e)
 			}
 			body = buffer
 			defer func() {
-				buffer.Reset()
-				BufferPool.Put(buffer)
+				r.memoryPool.Put(buffer)
 			}()
 		}
 	}
 
 	if r.urlFor != nil {
 		if err := r.urlFor(&r.u); err != nil {
-			return errors.Wrap(err, "url_for")
+			return WithHTTPCode(11, errors.Wrap(err, "url_for"))
 		}
 	}
 
@@ -443,16 +507,19 @@ func (r *Request) invoke(ctx context.Context, method string) error {
 		var responseBody string
 
 		if nil != resp.Body {
-			respBody, e := ioutil.ReadAll(resp.Body)
+			respBody := r.memoryPool.Get()
+			_, e := io.Copy(respBody, resp.Body)
 			resp.Body.Close()
 
 			if e != nil {
-				responseBody = string(respBody) + "\r\n*************** "
+				responseBody = respBody.String() + "\r\n*************** "
 				responseBody += e.Error()
 				responseBody += "***************"
 			} else {
-				responseBody = string(respBody)
+				responseBody = respBody.String()
 			}
+
+			r.memoryPool.Put(respBody)
 		}
 
 		if len(responseBody) == 0 {
@@ -475,7 +542,7 @@ func (r *Request) invoke(ctx context.Context, method string) error {
 
 	switch response := r.responseBody.(type) {
 	case ResponseFunc:
-		return response(req, resp)
+		return response(ctx, req, resp)
 	case *string:
 		var sb strings.Builder
 		if _, e = io.Copy(&sb, resp.Body); e != nil {
@@ -507,17 +574,16 @@ func (r *Request) invoke(ctx context.Context, method string) error {
 			return nil
 		}
 
-		buffer := BufferPool.Get().(*bytes.Buffer)
+		buffer := r.memoryPool.Get()
 		_, e = io.Copy(buffer, resp.Body)
 		if e != nil {
 			buffer.Reset()
-			BufferPool.Put(buffer)
+			r.memoryPool.Put(buffer)
 			return WithHTTPCode(11, Wrap(e, "request '"+method+"' is ok and read response fail"))
 		}
 
 		e = json.Unmarshal(buffer.Bytes(), response)
-		buffer.Reset()
-		BufferPool.Put(buffer)
+		r.memoryPool.Put(buffer)
 		if e != nil {
 			return WithHTTPCode(12, Wrap(e, "request '"+method+"' is ok and read response fail"))
 		}
@@ -577,7 +643,7 @@ func JoinWith(base string, paths []string) string {
 	return buf.String()
 }
 
-// func NewRequest(proxy Proxy, url string) Request {
+// func NewRequest(proxy Proxy, urlStr string) Request {
 //  return nil
 // }
 
@@ -590,4 +656,52 @@ func NewRequest(proxy *Proxy, urlStr string) *Request {
 
 func ReleaseRequest(proxy *Proxy, r *Request) {
 	proxy.Release(r)
+}
+
+var Default = &Proxy{}
+
+func Post(urlStr string, body, result interface{}) error {
+	return Default.New(urlStr).
+		SetBody(body).
+		Result(result).
+		POST(nil)
+}
+
+func Get(urlStr string, result interface{}) error {
+	return Default.New(urlStr).
+		Result(result).
+		GET(nil)
+}
+
+func Put(urlStr string, body, result interface{}) error {
+	return Default.New(urlStr).
+		SetBody(body).
+		Result(result).
+		PUT(nil)
+}
+
+func Delete(urlStr string, body, result interface{}) error {
+	return Default.New(urlStr).
+		SetBody(body).
+		Result(result).
+		DELETE(nil)
+}
+
+func Do(method, urlStr string, body, statusCode int, result interface{}) error {
+	return Default.New(urlStr).
+		SetBody(body).
+		Result(result).
+		Do(nil, method)
+}
+
+func RealIP(req *http.Request) string {
+	ra := req.RemoteAddr
+	if ip := req.Header.Get(HeaderXForwardedFor); ip != "" {
+		ra = ip
+	} else if ip := req.Header.Get(HeaderXRealIP); ip != "" {
+		ra = ip
+	} else {
+		ra, _, _ = net.SplitHostPort(ra)
+	}
+	return ra
 }

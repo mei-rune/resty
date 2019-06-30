@@ -2,6 +2,7 @@ package resty
 
 import (
 	"bytes"
+	"context"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -72,7 +73,7 @@ func echoFunc(t *testing.T, data *TestData) http.Handler {
 
 func assetBody(t *testing.T, req *Request, code int, excepted string) *Request {
 	return req.ExceptedCode(code).
-		Result(ResponseFunc(func(r *http.Request, res *http.Response) error {
+		Result(ResponseFunc(func(ctx context.Context, r *http.Request, res *http.Response) HTTPError {
 			bs, err := ioutil.ReadAll(res.Body)
 			if err != nil {
 				t.Error(err)
