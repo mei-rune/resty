@@ -117,6 +117,13 @@ type ImmutableProxy interface {
 	New(urlStr ...string) *Request
 }
 
+func Must(pxy *Proxy, err error) *Proxy {
+	if err != nil {
+		panic(err)
+	}
+	return pxy
+}
+
 func New(urlStr string) (*Proxy, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
@@ -152,29 +159,20 @@ type Proxy struct {
 }
 
 func (px *Proxy) Clone() *Proxy {
-	queryParams := url.Values{}
+	copyed := new(Proxy)
+	*copyed = *px
+	copyed.queryParams = url.Values{}
 	for key, value := range px.queryParams {
-		queryParams[key] = value
+		copyed.queryParams[key] = value
 	}
 
-	headers := url.Values{}
+	copyed.headers = url.Values{}
 	for key, value := range px.headers {
-		headers[key] = value
+		copyed.headers[key] = value
 	}
-
-	return &Proxy{
-		Tracer:      px.Tracer,
-		MemoryPool:  px.MemoryPool,
-		Client:      px.Client,
-		TimeFormat:  px.TimeFormat,
-		authWith:    px.authWith,
-		urlFor:      px.urlFor,
-		u:           px.u,
-		queryParams: queryParams,
-		headers:     headers,
-	}
+	return copyed
 }
-func (px *Proxy) JoinURL(urlStr ...string) *Proxy {
+func (px *Proxy) Join(urlStr ...string) *Proxy {
 	px.u.Path = JoinWith(px.u.Path, urlStr)
 	return px
 }
@@ -237,7 +235,22 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 		r.headers[key] = values
 	}
 
-	r.u.Path = JoinWith(r.u.Path, urlStr)
+	if len(urlStr) > 0 {
+		u, err := url.Parse(urlStr[0])
+		if err != nil {
+			panic(err)
+		}
+		if u.Scheme != "" {
+			r.u = *u
+			for key, values := range u.Query() {
+				r.queryParams[key] = values
+			}
+
+			r.u.Path = JoinWith(r.u.Path, urlStr[1:])
+		} else {
+			r.u.Path = JoinWith(r.u.Path, urlStr)
+		}
+	}
 	return r
 }
 
@@ -257,20 +270,8 @@ type Request struct {
 }
 
 func (r *Request) Clone() *Request {
-	copyed := &Request{
-		tracer:        r.tracer,
-		proxy:         r.proxy,
-		memoryPool:    r.memoryPool,
-		jsonUseNumber: r.jsonUseNumber,
-		authWith:      r.authWith,
-		urlFor:        r.urlFor,
-		u:             r.u,
-		queryParams:   url.Values{},
-		headers:       url.Values{},
-		requestBody:   r.requestBody,
-		exceptedCode:  r.exceptedCode,
-		responseBody:  nil,
-	}
+	copyed := new(Request)
+	*copyed = *r
 
 	if copyed.u.User != nil {
 		user := copyed.u.User.Username()
@@ -351,6 +352,30 @@ func (r *Request) SetParam(key, value string) *Request {
 }
 func (r *Request) AddParam(key, value string) *Request {
 	r.queryParams.Add(key, value)
+	return r
+}
+func (r *Request) AddParams(values url.Values) *Request {
+	for key, value := range values {
+		r.queryParams[key] = append(r.queryParams[key], value...)
+	}
+	return r
+}
+func (r *Request) SetParams(values url.Values) *Request {
+	for key, value := range values {
+		r.queryParams[key] = value
+	}
+	return r
+}
+func (r *Request) AddParamValues(values map[string]string) *Request {
+	for key, value := range values {
+		r.queryParams.Add(key, value)
+	}
+	return r
+}
+func (r *Request) SetParamValues(values map[string]string) *Request {
+	for key, value := range values {
+		r.queryParams.Set(key, value)
+	}
 	return r
 }
 func (r *Request) SetBody(body interface{}) *Request {
@@ -663,36 +688,36 @@ func ReleaseRequest(proxy *Proxy, r *Request) {
 	proxy.Release(r)
 }
 
-var Default = &Proxy{}
+var Default = Must(New(""))
 
-func Post(urlStr string, body, result interface{}) error {
+func Post(urlStr string, body, result interface{}) HTTPError {
 	return Default.New(urlStr).
 		SetBody(body).
 		Result(result).
 		POST(nil)
 }
 
-func Get(urlStr string, result interface{}) error {
+func Get(urlStr string, result interface{}) HTTPError {
 	return Default.New(urlStr).
 		Result(result).
 		GET(nil)
 }
 
-func Put(urlStr string, body, result interface{}) error {
+func Put(urlStr string, body, result interface{}) HTTPError {
 	return Default.New(urlStr).
 		SetBody(body).
 		Result(result).
 		PUT(nil)
 }
 
-func Delete(urlStr string, body, result interface{}) error {
+func Delete(urlStr string, body, result interface{}) HTTPError {
 	return Default.New(urlStr).
 		SetBody(body).
 		Result(result).
 		DELETE(nil)
 }
 
-func Do(method, urlStr string, body, statusCode int, result interface{}) error {
+func Do(method, urlStr string, body, statusCode int, result interface{}) HTTPError {
 	return Default.New(urlStr).
 		SetBody(body).
 		Result(result).
