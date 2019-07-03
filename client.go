@@ -112,6 +112,11 @@ func Unmarshal(result interface{}, cached *bytes.Buffer) ResponseFunc {
 	})
 }
 
+type ImmutableProxy interface {
+	Clone() *Proxy
+	New(urlStr ...string) *Request
+}
+
 func New(urlStr string) (*Proxy, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
