@@ -512,7 +512,7 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 
 	client := r.proxy.Client
 	if client == nil {
-		client = http.DefaultClient
+		client = InsecureHttpClent // http.DefaultClient
 	}
 
 	resp, e := client.Do(req)
