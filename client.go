@@ -248,7 +248,19 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 
 			r.u.Path = JoinWith(r.u.Path, urlStr[1:])
 		} else {
-			r.u.Path = JoinWith(r.u.Path, urlStr)
+			if u.RawQuery == "" && u.Fragment == "" {
+				r.u.Path = JoinWith(r.u.Path, urlStr)
+			} else {
+
+				for key, values := range u.Query() {
+					r.queryParams[key] = values
+				}
+				if u.Fragment != "" && r.u.Fragment == "" {
+					r.u.Fragment = u.Fragment
+				}
+				r.u.Path = Join(r.u.Path, u.Path)
+				r.u.Path = JoinWith(r.u.Path, urlStr[1:])
+			}
 		}
 	}
 	return r
