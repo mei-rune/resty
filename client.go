@@ -117,6 +117,10 @@ type ImmutableProxy interface {
 	New(urlStr ...string) *Request
 }
 
+type ImmutableRequest interface {
+	Clone() *Request
+}
+
 func Must(pxy *Proxy, err error) *Proxy {
 	if err != nil {
 		panic(err)
