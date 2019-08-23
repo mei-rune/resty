@@ -160,6 +160,7 @@ type Proxy struct {
 	u             url.URL
 	queryParams   url.Values
 	headers       url.Values
+	wrapResult    func(body interface{}) ResponseFunc
 }
 
 func (px *Proxy) Clone() *Proxy {
@@ -182,6 +183,10 @@ func (px *Proxy) Join(urlStr ...string) *Proxy {
 }
 func (px *Proxy) SetTracer(tracer opentracing.Tracer) *Proxy {
 	px.Tracer = tracer
+	return px
+}
+func (px *Proxy) SetWrapFunc(wrapResult func(body interface{}) ResponseFunc) *Proxy {
+	px.wrapResult = wrapResult
 	return px
 }
 func (px *Proxy) JSONUseNumber() *Proxy {
@@ -399,7 +404,11 @@ func (r *Request) SetBody(body interface{}) *Request {
 	return r
 }
 func (r *Request) Result(body interface{}) *Request {
-	r.responseBody = body
+	if r.proxy.wrapResult != nil {
+		r.responseBody = r.proxy.wrapResult(body)
+	} else {
+		r.responseBody = body
+	}
 	return r
 }
 func (r *Request) ExceptedCode(code int) *Request {
