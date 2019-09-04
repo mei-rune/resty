@@ -55,6 +55,7 @@ var TimeFormat = time.RFC3339
 var ErrBadArgument = errors.ErrBadArgument
 var WithHTTPCode = errors.WithHTTPCode
 var Wrap = errors.Wrap
+var AsHTTPError = errors.AsHTTPError
 
 var DefaultPool = &PooledBuffers{}
 
@@ -457,7 +458,7 @@ func (r *Request) invokeWithAuth(ctx context.Context, method string) HTTPError {
 
 	key, value, e := r.authWith(ctx, r, false)
 	if e != nil {
-		if he, ok := e.(HTTPError); ok {
+		if he, ok := AsHTTPError(e); ok {
 			return he
 		}
 		return WithHTTPCode(Wrap(e, "login fail"), errors.ErrReadResponseFail.HTTPCode())
@@ -471,7 +472,7 @@ func (r *Request) invokeWithAuth(ctx context.Context, method string) HTTPError {
 
 	key, value, e = r.authWith(ctx, r, true)
 	if e != nil {
-		if he, ok := e.(HTTPError); ok {
+		if he, ok := AsHTTPError(e); ok {
 			return he
 		}
 
