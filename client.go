@@ -98,12 +98,14 @@ func Unmarshal(result interface{}, cached *bytes.Buffer) ResponseFunc {
 			cached.Reset()
 		}
 
-		_, e := io.Copy(cached, resp.Body)
-		if e != nil {
-			return WithHTTPCode(Wrap(e, "request '"+req.Method+"' is ok and read response fail"), errors.ErrReadResponseFail.HTTPCode())
-		}
+		// _, e := io.Copy(cached, resp.Body)
+		// if e != nil {
+		// 	return WithHTTPCode(Wrap(e, "request '"+req.Method+"' is ok and read response fail"), errors.ErrReadResponseFail.HTTPCode())
+		// }
 
-		e = json.Unmarshal(cached.Bytes(), result)
+		decoder := json.NewDecoder(io.TeeReader(resp.Body, cached))
+		decoder.UseNumber()
+		e := decoder.Decode(result)
 		if e != nil {
 			return WithHTTPCode(Wrap(e, "request '"+req.Method+"' is ok and unmarshal response fail\r\n"+
 				cached.String()), errors.ErrUnmarshalResponseFail.HTTPCode())
