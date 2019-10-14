@@ -516,6 +516,13 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 		}
 	}
 
+	queryValues := QueryParamsFromContext(ctx)
+	if queryValues != nil {
+		for key, values := range queryValues {
+			r.queryParams[key] = values
+		}
+	}
+
 	r.u.RawQuery = r.queryParams.Encode()
 	urlStr := r.u.String()
 	req, e := http.NewRequest(method, urlStr, body)
@@ -533,6 +540,13 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 
 	if ctx != nil {
 		req = req.WithContext(ctx)
+	}
+
+	headValues := HeadersFromContext(ctx)
+	if headValues != nil {
+		for key, values := range headValues {
+			req.Header[key] = values
+		}
 	}
 
 	for key, values := range r.headers {
