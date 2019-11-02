@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
-	"net/url"
 )
 
 var InsecureHttpTransport = &http.Transport{
@@ -23,50 +22,55 @@ var InsecureHttpClent = &http.Client{Transport: InsecureHttpTransport}
 //	}
 //}
 
-type headerKeys struct{}
-
-func (headerKeys) String() string { return "ctx-headers" }
-
-var HeaderKey = headerKeys{}
-
-func ContextWithHeaders(ctx context.Context, s url.Values) context.Context {
-	return context.WithValue(ctx, HeaderKey, s)
+// Callbacks 回调
+type Callbacks struct {
+	OnBefore func(ctx context.Context, req *Request)
+	OnAfter  func(ctx context.Context, req *http.Request, resp *http.Response)
 }
 
-func HeadersFromContext(ctx context.Context) url.Values {
+type callbackKey struct{}
+
+func (callbackKey) String() string { return "ctx-resty-callbacks" }
+
+var CallbackKey = callbackKey{}
+
+func ContextWithOnBefore(ctx context.Context, onBefore func(ctx context.Context, req *Request)) context.Context {
+	callbacks := CallbacksFromContext(ctx)
+	if callbacks == nil {
+		callbacks = &Callbacks{
+			OnBefore: onBefore,
+		}
+		return context.WithValue(ctx, CallbackKey, callbacks)
+	}
+	callbacks.OnBefore = onBefore
+	return ctx
+}
+
+func ContextWithOnAfter(ctx context.Context, onAfter func(ctx context.Context, req *http.Request, resp *http.Response)) context.Context {
+	callbacks := CallbacksFromContext(ctx)
+	if callbacks == nil {
+		callbacks = &Callbacks{
+			OnAfter: onAfter,
+		}
+		return context.WithValue(ctx, CallbackKey, callbacks)
+	}
+	callbacks.OnAfter = onAfter
+	return ctx
+}
+
+func ContextWithCallbacks(ctx context.Context, s *Callbacks) context.Context {
+	return context.WithValue(ctx, CallbackKey, s)
+}
+
+func CallbacksFromContext(ctx context.Context) *Callbacks {
 	if ctx == nil {
 		return nil
 	}
-	o := ctx.Value(HeaderKey)
+	o := ctx.Value(CallbackKey)
 	if o == nil {
 		return nil
 	}
-	values, ok := o.(url.Values)
-	if !ok {
-		return nil
-	}
-	return values
-}
-
-type queryKeys struct{}
-
-func (queryKeys) String() string { return "ctx-query-str" }
-
-var QueryKey = queryKeys{}
-
-func ContextWithQueryParams(ctx context.Context, s url.Values) context.Context {
-	return context.WithValue(ctx, QueryKey, s)
-}
-
-func QueryParamsFromContext(ctx context.Context) url.Values {
-	if ctx == nil {
-		return nil
-	}
-	o := ctx.Value(QueryKey)
-	if o == nil {
-		return nil
-	}
-	values, ok := o.(url.Values)
+	values, ok := o.(*Callbacks)
 	if !ok {
 		return nil
 	}

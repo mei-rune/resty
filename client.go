@@ -515,12 +515,9 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 			return WithHTTPCode(Wrap(err, "generate url fail"), http.StatusBadRequest)
 		}
 	}
-
-	queryValues := QueryParamsFromContext(ctx)
-	if queryValues != nil {
-		for key, values := range queryValues {
-			r.queryParams[key] = values
-		}
+	callbacks := CallbacksFromContext(ctx)
+	if callbacks != nil && callbacks.OnBefore != nil {
+		callbacks.OnBefore(ctx, r)
 	}
 
 	r.u.RawQuery = r.queryParams.Encode()
@@ -542,13 +539,6 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 		req = req.WithContext(ctx)
 	}
 
-	headValues := HeadersFromContext(ctx)
-	if headValues != nil {
-		for key, values := range headValues {
-			req.Header[key] = values
-		}
-	}
-
 	for key, values := range r.headers {
 		req.Header[key] = values
 	}
@@ -561,6 +551,9 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 	resp, e := client.Do(req)
 	if e != nil {
 		return WithHTTPCode(e, http.StatusServiceUnavailable)
+	}
+	if callbacks != nil && callbacks.OnAfter != nil {
+		callbacks.OnAfter(ctx, req, resp)
 	}
 
 	if ht != nil {
