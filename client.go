@@ -320,6 +320,27 @@ func (r *Request) SetMemoryPool(pool MemoryPool) *Request {
 	r.memoryPool = pool
 	return r
 }
+
+func (r *Request) SetAbsURL(urlStr string) *Request {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		panic(err)
+	}
+
+	if u.Scheme != "" {
+		r.u = *u
+	} else {
+		r.u.Path = u.Path
+		r.u.Fragment = u.Fragment
+		r.u.Opaque = u.Opaque
+	}
+
+	for key, values := range u.Query() {
+		r.queryParams[key] = values
+	}
+	return r
+}
+
 func (r *Request) SetURL(urlStr string) *Request {
 	if urlStr != "" {
 		u, err := url.Parse(urlStr)
