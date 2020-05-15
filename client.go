@@ -164,6 +164,7 @@ type Proxy struct {
 	queryParams   url.Values
 	headers       url.Values
 	wrapResult    func(body interface{}) ResponseFunc
+	trace         func(*http.Client, *http.Request) (*http.Response, error)
 }
 
 func (px *Proxy) Clone() *Proxy {
@@ -184,6 +185,12 @@ func (px *Proxy) Join(urlStr ...string) *Proxy {
 	px.u.Path = JoinWith(px.u.Path, urlStr)
 	return px
 }
+
+func (px *Proxy) SetTraceFunc(trace func(*http.Client, *http.Request) (*http.Response, error)) *Proxy {
+	px.trace = trace
+	return px
+}
+
 func (px *Proxy) SetTracer(tracer opentracing.Tracer) *Proxy {
 	px.Tracer = tracer
 	return px
@@ -212,12 +219,20 @@ func (px *Proxy) AddHeader(key, value string) *Proxy {
 	px.headers.Add(key, value)
 	return px
 }
+func (px *Proxy) UnsetHeader(key string) *Proxy {
+	px.headers.Del(key)
+	return px
+}
 func (px *Proxy) SetParam(key, value string) *Proxy {
 	px.queryParams.Set(key, value)
 	return px
 }
 func (px *Proxy) AddParam(key, value string) *Proxy {
 	px.queryParams.Add(key, value)
+	return px
+}
+func (px *Proxy) UnsetParam(key string) *Proxy {
+	px.queryParams.Del(key)
 	return px
 }
 func (px *Proxy) SetContentType(contentType string) *Proxy {
@@ -236,6 +251,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 		authWith:      proxy.authWith,
 		urlFor:        proxy.urlFor,
 		u:             proxy.u,
+		trace:         proxy.trace,
 		queryParams:   url.Values{},
 		headers:       url.Values{},
 	}
@@ -291,6 +307,7 @@ type Request struct {
 	requestBody   interface{}
 	exceptedCode  int
 	responseBody  interface{}
+	trace         func(*http.Client, *http.Request) (*http.Response, error)
 }
 
 func (r *Request) Clone() *Request {
@@ -360,6 +377,12 @@ func (r *Request) SetURL(urlStr string) *Request {
 	}
 	return r
 }
+
+func (r *Request) SetTraceFunc(trace func(*http.Client, *http.Request) (*http.Response, error)) *Request {
+	r.trace = trace
+	return r
+}
+
 func (r *Request) AuthWith(authWith AuthFunc) *Request {
 	r.authWith = authWith
 	return r
@@ -387,12 +410,20 @@ func (r *Request) SetHeader(key, value string) *Request {
 	r.headers.Set(key, value)
 	return r
 }
+func (r *Request) UnsetHeader(key string) *Request {
+	r.headers.Del(key)
+	return r
+}
 func (r *Request) AddHeader(key, value string) *Request {
 	r.headers.Add(key, value)
 	return r
 }
 func (r *Request) SetParam(key, value string) *Request {
 	r.queryParams.Set(key, value)
+	return r
+}
+func (r *Request) UnsetParam(key string) *Request {
+	r.queryParams.Del(key)
 	return r
 }
 func (r *Request) AddParam(key, value string) *Request {
@@ -433,6 +464,10 @@ func (r *Request) Result(body interface{}) *Request {
 	} else {
 		r.responseBody = body
 	}
+	return r
+}
+func (r *Request) ResultFunc(f ResponseFunc) *Request {
+	r.responseBody = f
 	return r
 }
 func (r *Request) ExceptedCode(code int) *Request {
@@ -569,7 +604,13 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 		client = InsecureHttpClent // http.DefaultClient
 	}
 
-	resp, e := client.Do(req)
+	var resp *http.Response
+	if r.trace != nil {
+		resp, e = r.trace(client, req)
+	} else {
+		resp, e = client.Do(req)
+	}
+
 	if e != nil {
 		return WithHTTPCode(e, http.StatusServiceUnavailable)
 	}
