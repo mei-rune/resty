@@ -158,6 +158,7 @@ type Proxy struct {
 	Client        *http.Client
 	TimeFormat    string
 	jsonUseNumber bool
+	noBodyInError bool
 	authWith      AuthFunc
 	urlFor        URLFunc
 	u             url.URL
@@ -183,6 +184,11 @@ func (px *Proxy) Clone() *Proxy {
 }
 func (px *Proxy) Join(urlStr ...string) *Proxy {
 	px.u.Path = JoinWith(px.u.Path, urlStr)
+	return px
+}
+
+func (px *Proxy) NoBodyInError() *Proxy {
+	px.noBodyInError = true
 	return px
 }
 
@@ -248,6 +254,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 		proxy:         proxy,
 		memoryPool:    proxy.MemoryPool,
 		jsonUseNumber: proxy.jsonUseNumber,
+		noBodyInError: proxy.noBodyInError,
 		authWith:      proxy.authWith,
 		urlFor:        proxy.urlFor,
 		u:             proxy.u,
@@ -298,6 +305,7 @@ type Request struct {
 	tracer        opentracing.Tracer
 	proxy         *Proxy
 	memoryPool    MemoryPool
+	noBodyInError bool
 	jsonUseNumber bool
 	authWith      AuthFunc
 	urlFor        URLFunc
@@ -634,7 +642,7 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 	if !isOK {
 		var responseBody string
 
-		if nil != resp.Body {
+		if !r.noBodyInError && nil != resp.Body {
 			respBody := r.memoryPool.Get()
 			_, e := io.Copy(respBody, resp.Body)
 			resp.Body.Close()
