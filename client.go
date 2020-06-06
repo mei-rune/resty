@@ -159,6 +159,7 @@ type Proxy struct {
 	TimeFormat    string
 	jsonUseNumber bool
 	noBodyInError bool
+	errorFunc     ResponseFunc
 	authWith      AuthFunc
 	urlFor        URLFunc
 	u             url.URL
@@ -189,6 +190,11 @@ func (px *Proxy) Join(urlStr ...string) *Proxy {
 
 func (px *Proxy) NoBodyInError() *Proxy {
 	px.noBodyInError = true
+	return px
+}
+
+func (px *Proxy) ErrorFunc(f ResponseFunc) *Proxy {
+	px.errorFunc = f
 	return px
 }
 
@@ -259,6 +265,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 		urlFor:        proxy.urlFor,
 		u:             proxy.u,
 		trace:         proxy.trace,
+		errorFunc:     proxy.errorFunc,
 		queryParams:   url.Values{},
 		headers:       url.Values{},
 	}
@@ -315,6 +322,7 @@ type Request struct {
 	requestBody   interface{}
 	exceptedCode  int
 	responseBody  interface{}
+	errorFunc     ResponseFunc
 	trace         func(*http.Client, *http.Request) (*http.Response, error)
 }
 
@@ -476,6 +484,10 @@ func (r *Request) Result(body interface{}) *Request {
 }
 func (r *Request) ResultFunc(f ResponseFunc) *Request {
 	r.responseBody = f
+	return r
+}
+func (r *Request) ErrorFunc(f ResponseFunc) *Request {
+	r.errorFunc = f
 	return r
 }
 func (r *Request) ExceptedCode(code int) *Request {
@@ -640,6 +652,10 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 	}
 
 	if !isOK {
+		if r.errorFunc != nil {
+			return r.errorFunc(ctx, req, resp)
+		}
+
 		var responseBody string
 
 		if !r.noBodyInError && nil != resp.Body {
