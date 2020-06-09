@@ -243,6 +243,10 @@ func (px *Proxy) AddParam(key, value string) *Proxy {
 	px.queryParams.Add(key, value)
 	return px
 }
+func (px *Proxy) SetParamArray(key string, values []string) *Proxy {
+	px.queryParams[key] = values
+	return px
+}
 func (px *Proxy) UnsetParam(key string) *Proxy {
 	px.queryParams.Del(key)
 	return px
@@ -456,6 +460,10 @@ func (r *Request) SetParams(values url.Values) *Request {
 	for key, value := range values {
 		r.queryParams[key] = value
 	}
+	return r
+}
+func (r *Request) SetParamArray(key string, values []string) *Request {
+	r.queryParams[key] = values
 	return r
 }
 func (r *Request) AddParamValues(values map[string]string) *Request {
