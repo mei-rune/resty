@@ -700,6 +700,9 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 		return nil
 	}
 
+	if resp.StatusCode == http.StatusNoContent {
+		return errors.ErrNoContent
+	}
 	switch response := r.responseBody.(type) {
 	case ResponseFunc:
 		return response(ctx, req, resp)
