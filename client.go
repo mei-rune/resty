@@ -85,7 +85,7 @@ func (pool *PooledBuffers) Put(b *bytes.Buffer) {
 
 type URLFunc func(u *url.URL) error
 
-type AuthFunc func(context.Context, *Request, bool) (string, string, error)
+type AuthFunc func(context.Context, *Request, bool) (*Request, error)
 
 type ResponseFunc func(context.Context, *http.Request, *http.Response) HTTPError
 
@@ -542,21 +542,20 @@ func (r *Request) invokeWithAuth(ctx context.Context, method string) HTTPError {
 		return r.invoke(ctx, method)
 	}
 
-	key, value, e := r.authWith(ctx, r, false)
+	rr, e := r.authWith(ctx, r, false)
 	if e != nil {
 		if he, ok := AsHTTPError(e); ok {
 			return he
 		}
 		return WithHTTPCode(Wrap(e, "login fail"), errors.ErrReadResponseFail.HTTPCode())
 	}
-	r = r.SetParam(key, value)
 
-	err := r.invoke(ctx, method)
+	err := rr.invoke(ctx, method)
 	if err == nil || !isUnauthorized(err) {
 		return err
 	}
 
-	key, value, e = r.authWith(ctx, r, true)
+	rr, e = r.authWith(ctx, r, true)
 	if e != nil {
 		if he, ok := AsHTTPError(e); ok {
 			return he
@@ -564,9 +563,8 @@ func (r *Request) invokeWithAuth(ctx context.Context, method string) HTTPError {
 
 		return WithHTTPCode(Wrap(e, "login fail"), errors.ErrReadResponseFail.HTTPCode())
 	}
-	r = r.SetParam(key, value)
 
-	return r.invoke(ctx, method)
+	return rr.invoke(ctx, method)
 }
 
 func (r *Request) invoke(ctx context.Context, method string) HTTPError {
