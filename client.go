@@ -323,6 +323,7 @@ type Request struct {
 	u             url.URL
 	queryParams   url.Values
 	headers       url.Values
+	cookies       []*http.Cookie
 	requestBody   interface{}
 	exceptedCode  int
 	responseBody  interface{}
@@ -351,6 +352,9 @@ func (r *Request) Clone() *Request {
 	for key, values := range r.headers {
 		copyed.headers[key] = values
 	}
+
+	copyed.cookies = make([]*http.Cookie, len(r.cookies))
+	copy(copyed.cookies, r.cookies)
 	return copyed
 }
 func (r *Request) SetMemoryPool(pool MemoryPool) *Request {
@@ -476,6 +480,10 @@ func (r *Request) SetParamValues(values map[string]string) *Request {
 	for key, value := range values {
 		r.queryParams.Set(key, value)
 	}
+	return r
+}
+func (r *Request) AddCookie(cookie *http.Cookie) *Request {
+	r.cookies = append(r.cookies, cookie)
 	return r
 }
 func (r *Request) SetBody(body interface{}) *Request {
@@ -623,6 +631,10 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 
 	for key, values := range r.headers {
 		req.Header[key] = values
+	}
+
+	for _, cookie := range r.cookies {
+		req.AddCookie(cookie)
 	}
 
 	client := r.proxy.Client
