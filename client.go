@@ -831,7 +831,8 @@ func ReleaseRequest(proxy *Proxy, r *Request) {
 	proxy.Release(r)
 }
 
-var Default = Must(New(""))
+var Default = Must(New("")).
+	SetHeader(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
 
 func Post(urlStr string, body, result interface{}) HTTPError {
 	return Default.New(urlStr).
