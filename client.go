@@ -51,6 +51,10 @@ const (
 
 type HTTPError = errors.HTTPError
 
+var DefaultTraceOptions = []tracing.ClientOption{
+	tracing.ClientTrace(false),
+	tracing.InjectSpanContext(true),
+}
 var TimeFormat = time.RFC3339
 var ErrBadArgument = errors.ErrBadArgument
 var WithHTTPCode = errors.WithHTTPCode
@@ -154,6 +158,7 @@ func New(urlStr string) (*Proxy, error) {
 
 type Proxy struct {
 	Tracer        opentracing.Tracer
+	traceOptions  []tracing.ClientOption
 	MemoryPool    MemoryPool
 	Client        *http.Client
 	TimeFormat    string
@@ -203,8 +208,13 @@ func (px *Proxy) SetTraceFunc(trace func(*http.Client, *http.Request) (*http.Res
 	return px
 }
 
-func (px *Proxy) SetTracer(tracer opentracing.Tracer) *Proxy {
+func (px *Proxy) SetTracer(tracer opentracing.Tracer, traceOptions ...tracing.ClientOption) *Proxy {
 	px.Tracer = tracer
+	px.traceOptions = traceOptions
+
+	if len(px.traceOptions) == 0 {
+		px.traceOptions = DefaultTraceOptions
+	}
 	return px
 }
 func (px *Proxy) SetWrapFunc(wrapResult func(body interface{}) ResponseFunc) *Proxy {
@@ -261,6 +271,7 @@ func (proxy *Proxy) Release(request *Request) {}
 func (proxy *Proxy) New(urlStr ...string) *Request {
 	r := &Request{
 		tracer:        proxy.Tracer,
+		traceOptions:  proxy.traceOptions,
 		proxy:         proxy,
 		memoryPool:    proxy.MemoryPool,
 		jsonUseNumber: proxy.jsonUseNumber,
@@ -314,6 +325,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 
 type Request struct {
 	tracer        opentracing.Tracer
+	traceOptions  []tracing.ClientOption
 	proxy         *Proxy
 	memoryPool    MemoryPool
 	noBodyInError bool
@@ -418,8 +430,12 @@ func (r *Request) JoinURL(urlStr ...string) *Request {
 	r.u.Path = JoinWith(r.u.Path, urlStr)
 	return r
 }
-func (r *Request) SetTracer(tracer opentracing.Tracer) *Request {
+func (r *Request) SetTracer(tracer opentracing.Tracer, traceOptions ...tracing.ClientOption) *Request {
 	r.tracer = tracer
+	r.traceOptions = traceOptions
+	if len(r.traceOptions) == 0 {
+		r.traceOptions = DefaultTraceOptions
+	}
 	return r
 }
 func (r *Request) SetURLFor(cb URLFunc) *Request {
@@ -619,7 +635,7 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 
 	var ht *tracing.Tracer
 	if r.tracer != nil {
-		ctx, req, ht = tracing.TraceRequest(ctx, r.tracer, req)
+		ctx, req, ht = tracing.TraceRequest(ctx, r.tracer, req, r.traceOptions...)
 		defer ht.Finish()
 
 		ht.Start(req)
@@ -655,7 +671,6 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 	if callbacks != nil && callbacks.OnAfter != nil {
 		callbacks.OnAfter(ctx, req, resp)
 	}
-
 	if ht != nil {
 		ht.Stop(resp)
 	}
