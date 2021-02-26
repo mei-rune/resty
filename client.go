@@ -476,9 +476,22 @@ func (r *Request) AddParams(values url.Values) *Request {
 	}
 	return r
 }
+func (r *Request) AddParamsWithPrefix(prefix string, values url.Values) *Request {
+	for key, value := range values {
+		key = prefix + key
+		r.queryParams[key] = append(r.queryParams[key], value...)
+	}
+	return r
+}
 func (r *Request) SetParams(values url.Values) *Request {
 	for key, value := range values {
 		r.queryParams[key] = value
+	}
+	return r
+}
+func (r *Request) SetParamsWithPrefix(prefix string, values url.Values) *Request {
+	for key, value := range values {
+		r.queryParams[prefix+key] = value
 	}
 	return r
 }
@@ -492,9 +505,21 @@ func (r *Request) AddParamValues(values map[string]string) *Request {
 	}
 	return r
 }
+func (r *Request) AddParamValuesWithPrefix(prefix string, values map[string]string) *Request {
+	for key, value := range values {
+		r.queryParams.Add(prefix+key, value)
+	}
+	return r
+}
 func (r *Request) SetParamValues(values map[string]string) *Request {
 	for key, value := range values {
 		r.queryParams.Set(key, value)
+	}
+	return r
+}
+func (r *Request) SetParamValuesWithPrefix(prefix string, values map[string]string) *Request {
+	for key, value := range values {
+		r.queryParams.Set(prefix+key, value)
 	}
 	return r
 }
