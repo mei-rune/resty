@@ -458,6 +458,14 @@ func (r *Request) AddHeader(key, value string) *Request {
 	r.headers.Add(key, value)
 	return r
 }
+func (r *Request) SetRawQuery(query string) *Request {
+	if query == "" || query == "?" {
+		return r
+	}
+	params, _ := url.ParseQuery(query)
+	return r.SetParams(params)
+}
+
 func (r *Request) SetParam(key, value string) *Request {
 	r.queryParams.Set(key, value)
 	return r
