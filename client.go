@@ -747,10 +747,11 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 	}
 
 	// Install closing the request body (if any)
+	bodyCloser := resp.Body
 	defer func() {
-		if nil != resp.Body {
-			io.Copy(ioutil.Discard, resp.Body)
-			resp.Body.Close()
+		if nil != bodyCloser {
+			io.Copy(ioutil.Discard, bodyCloser)
+			bodyCloser.Close()
 		}
 	}()
 
