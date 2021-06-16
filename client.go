@@ -281,6 +281,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 		u:             proxy.u,
 		trace:         proxy.trace,
 		errorFunc:     proxy.errorFunc,
+		wrapResult:    proxy.wrapResult,
 		queryParams:   url.Values{},
 		headers:       url.Values{},
 	}
@@ -340,6 +341,7 @@ type Request struct {
 	exceptedCode  int
 	responseBody  interface{}
 	errorFunc     ResponseFunc
+	wrapResult    func(body interface{}) ResponseFunc
 	trace         func(*http.Client, *http.Request) (*http.Response, error)
 }
 
@@ -428,6 +430,10 @@ func (r *Request) RequestURL() string {
 }
 func (r *Request) JoinURL(urlStr ...string) *Request {
 	r.u.Path = JoinWith(r.u.Path, urlStr)
+	return r
+}
+func (r *Request) SetWrapFunc(wrapResult func(body interface{}) ResponseFunc) *Request {
+	r.wrapResult = wrapResult
 	return r
 }
 func (r *Request) SetTracer(tracer opentracing.Tracer, traceOptions ...tracing.ClientOption) *Request {
@@ -540,8 +546,8 @@ func (r *Request) SetBody(body interface{}) *Request {
 	return r
 }
 func (r *Request) Result(body interface{}) *Request {
-	if r.proxy.wrapResult != nil {
-		r.responseBody = r.proxy.wrapResult(body)
+	if r.wrapResult != nil {
+		r.responseBody = r.wrapResult(body)
 	} else {
 		r.responseBody = body
 	}
