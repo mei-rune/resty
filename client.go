@@ -723,6 +723,15 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 		isOK = true
 	}
 
+	// Install closing the request body (if any)
+	bodyCloser := resp.Body
+	defer func() {
+		if bodyCloser != nil {
+			io.Copy(ioutil.Discard, bodyCloser)
+			bodyCloser.Close()
+		}
+	}()
+
 	if !isOK {
 		if r.errorFunc != nil {
 			return r.errorFunc(ctx, req, resp)
@@ -733,7 +742,6 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 		if !r.noBodyInError && nil != resp.Body {
 			respBody := r.memoryPool.Get()
 			_, e := io.Copy(respBody, resp.Body)
-			resp.Body.Close()
 
 			if e != nil {
 				responseBody = respBody.String() + "\r\n*************** "
@@ -751,15 +759,6 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 		}
 		return WithHTTPCode(errors.New("request '"+urlStr+"' fail: "+resp.Status+": "+responseBody), resp.StatusCode)
 	}
-
-	// Install closing the request body (if any)
-	bodyCloser := resp.Body
-	defer func() {
-		if nil != bodyCloser {
-			io.Copy(ioutil.Discard, bodyCloser)
-			bodyCloser.Close()
-		}
-	}()
 
 	if r.responseBody == nil {
 		return nil
