@@ -114,7 +114,6 @@ func Unmarshal(result interface{}, cached *bytes.Buffer) ResponseFunc {
 			return WithHTTPCode(Wrap(e, "request '"+req.Method+"' is ok and unmarshal response fail\r\n"+
 				cached.String()), errors.ErrUnmarshalResponseFail.HTTPCode())
 		}
-
 		return nil
 	})
 }
@@ -148,7 +147,7 @@ func New(urlStr string) (*Proxy, error) {
 
 	return &Proxy{
 		MemoryPool:  DefaultPool,
-		Client:      http.DefaultClient,
+		Client:      InsecureHttpClent,
 		TimeFormat:  TimeFormat,
 		u:           *u,
 		queryParams: queryParams,
@@ -767,6 +766,7 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 	if resp.StatusCode == http.StatusNoContent {
 		return errors.ErrNoContent
 	}
+
 	switch response := r.responseBody.(type) {
 	case ResponseFunc:
 		return response(ctx, req, resp)
