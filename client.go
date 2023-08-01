@@ -69,10 +69,7 @@ func init() {
 	}
 }
 
-type MemoryPool interface {
-	Get() *bytes.Buffer
-	Put(*bytes.Buffer)
-}
+type MemoryPool = tracing.MemoryPool
 
 type PooledBuffers struct {
 	Pool sync.Pool
