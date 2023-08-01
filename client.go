@@ -136,6 +136,10 @@ func New(urlStr string) (*Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewWith(u)
+}
+
+func NewWith(u *url.URL) (*Proxy, error) {
 	var queryParams = url.Values{}
 	for key, values := range u.Query() {
 		queryParams[key] = values
