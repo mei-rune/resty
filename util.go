@@ -4,6 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
+	"net/url"
+	"time"
+
+	"github.com/runner-mei/errors"
 )
 
 var InsecureHttpTransport = &http.Transport{
@@ -75,4 +79,62 @@ func CallbacksFromContext(ctx context.Context) *Callbacks {
 		return nil
 	}
 	return values
+}
+
+func GetTokenStringFunc(prx *Proxy, loginURL, username, password string) func(context.Context, bool) (string, error) {
+	if prx == nil {
+		prx = Default
+	}
+
+	var cachedToken string
+	var cachedExpiresAt time.Time
+
+	return func(ctx context.Context, force bool) (string, error) {
+		if !force && cachedToken != "" && time.Now().Before(cachedExpiresAt) {
+			return cachedToken, nil
+		}
+
+		var auth struct {
+			Token     string `json:"token"`
+			ExpiresIn int64  `json:"expires_in"`
+		}
+
+		err := prx.New(loginURL).
+			SetParam("_method", "POST").
+			SetParam("username", username).
+			SetParam("password", password).
+			Result(&auth).
+			GET(ctx)
+		if err != nil {
+			if err.HTTPCode() == http.StatusNotFound {
+				return "", errors.NewError(http.StatusUnauthorized, "read token fail")
+			}
+			var ue *url.Error
+			if errors.As(err, &ue) {
+				if ue.Err != nil {
+					return "", errors.RuntimeWrap(ue.Err, "read token fail")
+				}
+			}
+			return "", errors.RuntimeWrap(err, "read token fail")
+		}
+		if auth.Token == "" {
+			return "", errors.NewError(http.StatusInternalServerError,
+				"get token fail, token is empty string")
+		}
+		cachedToken = auth.Token
+		cachedExpiresAt = time.Now().Add(time.Duration(auth.ExpiresIn-5) * time.Second)
+		return cachedToken, nil
+	}
+}
+
+func GetTokenFunc(prx *Proxy, loginURL, username, password string) func(context.Context, *Request, bool) (*Request, error) {
+	readToken := GetTokenStringFunc(prx, loginURL, username, password)
+
+	return func(ctx context.Context, r *Request, force bool) (*Request, error) {
+		token, err := readToken(ctx, force)
+		if err != nil {
+			return nil, err
+		}
+		return r.SetParam("token", token), nil
+	}
 }
