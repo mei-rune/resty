@@ -131,10 +131,51 @@ func GetTokenFunc(prx *Proxy, loginURL, username, password string) func(context.
 	readToken := GetTokenStringFunc(prx, loginURL, username, password)
 
 	return func(ctx context.Context, r *Request, force bool) (*Request, error) {
+		fn := DeliveryAuthFromContext(ctx)
+		if fn != nil {
+			return fn(ctx, r, force)
+		}
+
 		token, err := readToken(ctx, force)
 		if err != nil {
 			return nil, err
 		}
 		return r.SetParam("token", token), nil
 	}
+}
+
+type deliveryAuthKey struct{}
+
+func (*deliveryAuthKey) String() string {
+	return "delivery-auth-key"
+}
+
+var (
+	DeliveryAuthKey = &deliveryAuthKey{}
+)
+
+func ContextWithDeliveryAuth(ctx context.Context, fn AuthFunc) context.Context {
+	return context.WithValue(ctx, DeliveryAuthKey, fn)
+}
+
+func DeliveryAuthFromContext(ctx context.Context) AuthFunc {
+	if ctx == nil {
+		return nil
+	}
+	o := ctx.Value(DeliveryAuthKey)
+	if o == nil {
+		return nil
+	}
+	fn, ok := o.(AuthFunc)
+	if !ok {
+		return nil
+	}
+	return fn
+}
+
+func ContextWithDeliveryCookie(ctx context.Context, cookie *http.Cookie) context.Context {
+	return ContextWithDeliveryAuth(ctx,
+		func(ctx context.Context, r *Request, force bool) (*Request, error) {
+			return r.AddCookie(cookie), nil
+		})
 }
