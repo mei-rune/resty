@@ -19,7 +19,6 @@ type DebugProvider interface {
 	NewFile(s string) io.WriteCloser
 }
 
-
 // FileProvider implements a debugging provider that creates a real file for
 // every call to NewFile. It maintains a list of all files that it creates,
 // such that it can close them when its Flush function is called.

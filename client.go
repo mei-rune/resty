@@ -3,6 +3,7 @@ package resty
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"io/ioutil"
@@ -14,8 +15,9 @@ import (
 	"time"
 
 	opentracing "github.com/opentracing/opentracing-go"
-	"github.com/runner-mei/errors"
+	// "github.com/runner-mei/errors"
 	"github.com/runner-mei/resty/tracing"
+	"golang.org/x/exp/errors"
 )
 
 const (
@@ -49,19 +51,92 @@ const (
 	HeaderXRealIP       = "X-Real-IP"
 )
 
-type HTTPError = errors.HTTPError
+type HTTPError interface {
+	error
+	HTTPCoder
+}
+
+type HTTPCoder interface {
+	HTTPCode() int
+}
+
+type withMessage struct {
+	err error
+	msg string
+}
+
+var _ errors.Wrapper = &withMessage{}
+
+func (w *withMessage) Unwrap() error {
+	return w.err
+}
+
+func (w *withMessage) Error() string {
+	return w.msg + ": " + w.err.Error()
+}
+
+func Wrap(err error, msg string) error {
+	return &withMessage{err: err, msg: msg}
+}
+
+type withCode struct {
+	err  error
+	code int
+}
+
+var _ errors.Wrapper = &withCode{}
+
+func (w *withCode) HTTPCode() int {
+	return ToHttpCode(w.code)
+}
+
+func ToHttpCode(code int) int {
+	if code < 1000 {
+		return code
+	}
+	return code / 1000
+}
+
+func (w *withCode) ErrorCode() int {
+	return w.code
+}
+
+func (w *withCode) Unwrap() error {
+	return w.err
+}
+
+func (w *withCode) Error() string {
+	return w.err.Error()
+}
+
+func WithHTTPCode(err error, code int) HTTPError {
+	return &withCode{err: err, code: code}
+}
+
+func AsHTTPError(err error) (HTTPError, bool) {
+	he, ok := err.(HTTPError)
+	return he, ok
+}
 
 var DefaultTraceOptions = []tracing.ClientOption{
 	tracing.ClientTrace(false),
 	tracing.InjectSpanContext(true),
 }
 var TimeFormat = time.RFC3339
-var ErrBadArgument = errors.ErrBadArgument
-var WithHTTPCode = errors.WithHTTPCode
-var Wrap = errors.Wrap
-var AsHTTPError = errors.AsHTTPError
 
 var DefaultPool = &PooledBuffers{}
+
+var (
+	ErrNoContent = WithHTTPCode(errors.New("no content"), http.StatusNoContent*1000+001)
+)
+
+func ErrReadResponseFailCode() int {
+	return 560011
+}
+
+func ErrUnmarshalResponseFailCode() int {
+	return 560012
+}
 
 func init() {
 	DefaultPool.Pool.New = func() interface{} {
@@ -101,7 +176,7 @@ func Unmarshal(result interface{}, cached *bytes.Buffer) ResponseFunc {
 
 		// _, e := io.Copy(cached, resp.Body)
 		// if e != nil {
-		// 	return WithHTTPCode(Wrap(e, "request '"+req.Method+"' is ok and read response fail"), errors.ErrReadResponseFail.HTTPCode())
+		// 	return WithHTTPCode(Wrap(e, "request '"+req.Method+"' is ok and read response fail"), ErrReadResponseFailCode())
 		// }
 
 		decoder := json.NewDecoder(io.TeeReader(resp.Body, cached))
@@ -109,7 +184,7 @@ func Unmarshal(result interface{}, cached *bytes.Buffer) ResponseFunc {
 		e := decoder.Decode(result)
 		if e != nil {
 			return WithHTTPCode(Wrap(e, "request '"+req.Method+"' is ok and unmarshal response fail\r\n"+
-				cached.String()), errors.ErrUnmarshalResponseFail.HTTPCode())
+				cached.String()), ErrUnmarshalResponseFailCode())
 		}
 		return nil
 	})
@@ -227,6 +302,10 @@ func (px *Proxy) JSONUseNumber() *Proxy {
 }
 func (px *Proxy) SetURLFor(cb URLFunc) *Proxy {
 	px.urlFor = cb
+	return px
+}
+func (px *Proxy) SetBasicAuth(useranme, secret string) *Proxy {
+	px.headers.Set("Authorization", "Basic "+basicAuth(useranme, secret))
 	return px
 }
 func (px *Proxy) AuthWith(authWith AuthFunc) *Proxy {
@@ -537,6 +616,22 @@ func (r *Request) SetParamValuesWithPrefix(prefix string, values map[string]stri
 	}
 	return r
 }
+
+func (r *Request) SetBasicAuth(username, secret string) *Request {
+	r.headers.Set("Authorization", "Basic "+basicAuth(username, secret))
+	return r
+}
+
+// See 2 (end of page 4) https://www.ietf.org/rfc/rfc2617.txt
+// "To receive authorization, the client sends the userid and password,
+// separated by a single colon (":") character, within a base64
+// encoded string in the credentials."
+// It is not meant to be urlencoded.
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
+}
+
 func (r *Request) AddCookie(cookie *http.Cookie) *Request {
 	r.cookies = append(r.cookies, cookie)
 	return r
@@ -610,7 +705,7 @@ func (r *Request) invokeWithAuth(ctx context.Context, method string) HTTPError {
 		if he, ok := AsHTTPError(e); ok {
 			return he
 		}
-		return WithHTTPCode(Wrap(e, "login fail"), errors.ErrReadResponseFail.HTTPCode())
+		return WithHTTPCode(Wrap(e, "login fail"), ErrReadResponseFailCode())
 	}
 
 	err := rr.invoke(ctx, method)
@@ -624,7 +719,7 @@ func (r *Request) invokeWithAuth(ctx context.Context, method string) HTTPError {
 			return he
 		}
 
-		return WithHTTPCode(Wrap(e, "login fail"), errors.ErrReadResponseFail.HTTPCode())
+		return WithHTTPCode(Wrap(e, "login fail"), ErrReadResponseFailCode())
 	}
 
 	return rr.invoke(ctx, method)
@@ -765,7 +860,7 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
-		return errors.ErrNoContent
+		return ErrNoContent
 	}
 
 	switch response := r.responseBody.(type) {
@@ -774,14 +869,14 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 	case *string:
 		var sb strings.Builder
 		if _, e = io.Copy(&sb, resp.Body); e != nil {
-			return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), errors.ErrReadResponseFail.HTTPCode())
+			return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), ErrReadResponseFailCode())
 		}
 		*response = sb.String()
 		return nil
 	case *[]byte:
 		buffer := bytes.NewBuffer(make([]byte, 0, 1024))
 		if _, e = io.Copy(buffer, resp.Body); e != nil {
-			return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), errors.ErrReadResponseFail.HTTPCode())
+			return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), ErrReadResponseFailCode())
 		}
 		*response = buffer.Bytes()
 		return nil
@@ -790,14 +885,14 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 		if e == nil {
 			return nil
 		}
-		return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), errors.ErrReadResponseFail.HTTPCode())
+		return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), ErrReadResponseFailCode())
 	default:
 		if r.jsonUseNumber {
 			decoder := json.NewDecoder(resp.Body)
 			decoder.UseNumber()
 			e = decoder.Decode(response)
 			if e != nil {
-				return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), errors.ErrUnmarshalResponseFail.HTTPCode())
+				return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), ErrUnmarshalResponseFailCode())
 			}
 			return nil
 		}
@@ -807,13 +902,13 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 		if e != nil {
 			buffer.Reset()
 			r.memoryPool.Put(buffer)
-			return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), errors.ErrReadResponseFail.HTTPCode())
+			return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), ErrReadResponseFailCode())
 		}
 
 		e = json.Unmarshal(buffer.Bytes(), response)
 		r.memoryPool.Put(buffer)
 		if e != nil {
-			return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), errors.ErrUnmarshalResponseFail.HTTPCode())
+			return WithHTTPCode(Wrap(e, "request '"+method+"' is ok and read response fail"), ErrUnmarshalResponseFailCode())
 		}
 		return nil
 	}

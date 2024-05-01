@@ -87,25 +87,25 @@ func ClientSpanObserver(f func(span opentracing.Span, r *http.Request)) ClientOp
 //
 // Example:
 //
-// 	func AskGoogle(ctx context.Context) error {
-// 		client := &http.Client{Transport: &nethttp.Transport{}}
-// 		req, err := http.NewRequest("GET", "http://google.com", nil)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		req = req.WithContext(ctx) // extend existing trace, if any
+//		func AskGoogle(ctx context.Context) error {
+//			client := &http.Client{Transport: &nethttp.Transport{}}
+//			req, err := http.NewRequest("GET", "http://google.com", nil)
+//			if err != nil {
+//				return err
+//			}
+//			req = req.WithContext(ctx) // extend existing trace, if any
 //
-// 		req, ht := nethttp.TraceRequest(tracer, req)
-// 		defer ht.Finish()
+//			req, ht := nethttp.TraceRequest(tracer, req)
+//			defer ht.Finish()
 //
-//      req = req.WithContext(ContextWithTracer(req.Context(), ht))
-// 		res, err := client.Do(req)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		res.Body.Close()
-// 		return nil
-// 	}
+//	     req = req.WithContext(ContextWithTracer(req.Context(), ht))
+//			res, err := client.Do(req)
+//			if err != nil {
+//				return err
+//			}
+//			res.Body.Close()
+//			return nil
+//		}
 func TraceRequest(ctx context.Context, tr opentracing.Tracer, req *http.Request, options ...ClientOption) (context.Context, *http.Request, *Tracer) {
 	opts := &clientOptions{
 		spanObserver: func(_ opentracing.Span, _ *http.Request) {},
