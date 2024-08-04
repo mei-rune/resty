@@ -61,6 +61,18 @@ var WithHTTPCode = errors.WithHTTPCode
 var Wrap = errors.Wrap
 var AsHTTPError = errors.AsHTTPError
 
+var (
+	ErrNoContent = WithHTTPCode(errors.New("no content"), http.StatusNoContent*1000+001)
+)
+
+func ErrReadResponseFailCode() int {
+	return errors.ErrReadResponseFail.HTTPCode()
+}
+
+func ErrUnmarshalResponseFailCode() int {
+	return errors.ErrUnmarshalResponseFail.HTTPCode()
+}
+
 var DefaultPool = &PooledBuffers{}
 
 func init() {
