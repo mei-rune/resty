@@ -3,6 +3,7 @@ package resty
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"io/ioutil"
@@ -239,6 +240,10 @@ func (px *Proxy) JSONUseNumber() *Proxy {
 }
 func (px *Proxy) SetURLFor(cb URLFunc) *Proxy {
 	px.urlFor = cb
+	return px
+}
+func (px *Proxy) SetBasicAuth(useranme, secret string) *Proxy {
+	px.headers.Set("Authorization", "Basic "+basicAuth(useranme, secret))
 	return px
 }
 func (px *Proxy) AuthWith(authWith AuthFunc) *Proxy {
@@ -549,6 +554,22 @@ func (r *Request) SetParamValuesWithPrefix(prefix string, values map[string]stri
 	}
 	return r
 }
+
+func (r *Request) SetBasicAuth(username, secret string) *Request {
+	r.headers.Set("Authorization", "Basic "+basicAuth(username, secret))
+	return r
+}
+
+// See 2 (end of page 4) https://www.ietf.org/rfc/rfc2617.txt
+// "To receive authorization, the client sends the userid and password,
+// separated by a single colon (":") character, within a base64
+// encoded string in the credentials."
+// It is not meant to be urlencoded.
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
+}
+
 func (r *Request) AddCookie(cookie *http.Cookie) *Request {
 	r.cookies = append(r.cookies, cookie)
 	return r
