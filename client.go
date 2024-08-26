@@ -124,6 +124,18 @@ var DefaultTraceOptions = []tracing.ClientOption{
 }
 var TimeFormat = time.RFC3339
 
+var (
+	ErrNoContent = WithHTTPCode(errors.New("no content"), http.StatusNoContent*1000+001)
+)
+
+func ErrReadResponseFailCode() int {
+	return errors.ErrReadResponseFail.HTTPCode()
+}
+
+func ErrUnmarshalResponseFailCode() int {
+	return errors.ErrUnmarshalResponseFail.HTTPCode()
+}
+
 var DefaultPool = &PooledBuffers{}
 
 var (
@@ -974,11 +986,18 @@ func JoinWith(base string, paths []string) string {
 // }
 
 func NewRequest(proxy *Proxy, urlStr string) *Request {
+	if proxy == nil {
+		return Default.New(urlStr)
+	}
 	return proxy.New(urlStr)
 }
 
 func ReleaseRequest(proxy *Proxy, r *Request) {
-	proxy.Release(r)
+	if proxy == nil {
+		Default.Release(r)
+	} else {
+		proxy.Release(r)
+	}
 }
 
 var Default = Must(New("")).
