@@ -138,18 +138,6 @@ func ErrUnmarshalResponseFailCode() int {
 
 var DefaultPool = &PooledBuffers{}
 
-var (
-	ErrNoContent = WithHTTPCode(errors.New("no content"), http.StatusNoContent*1000+001)
-)
-
-func ErrReadResponseFailCode() int {
-	return 560011
-}
-
-func ErrUnmarshalResponseFailCode() int {
-	return 560012
-}
-
 func init() {
 	DefaultPool.Pool.New = func() interface{} {
 		return bytes.NewBuffer(make([]byte, 0, 1024))
