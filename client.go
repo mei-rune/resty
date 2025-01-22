@@ -126,14 +126,16 @@ var TimeFormat = time.RFC3339
 
 var (
 	ErrNoContent = WithHTTPCode(errors.New("no content"), http.StatusNoContent*1000+001)
+	ErrReadResponseFail = WithHTTPCode(errors.New("read response error"), 560011)
+	ErrUnmarshalResponseFail = WithHTTPCode(errors.New("unmarshal response error"), 560012)
 )
 
 func ErrReadResponseFailCode() int {
-	return errors.ErrReadResponseFail.HTTPCode()
+	return ErrReadResponseFail.HTTPCode()
 }
 
 func ErrUnmarshalResponseFailCode() int {
-	return errors.ErrUnmarshalResponseFail.HTTPCode()
+	return ErrUnmarshalResponseFail.HTTPCode()
 }
 
 var DefaultPool = &PooledBuffers{}
