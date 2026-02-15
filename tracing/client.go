@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptrace"
 
-	opentracing "github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
-	"github.com/opentracing/opentracing-go/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type contextKey int
@@ -33,7 +35,7 @@ type clientOptions struct {
 	componentName            string
 	disableClientTrace       bool
 	disableInjectSpanContext bool
-	spanObserver             func(span opentracing.Span, r *http.Request)
+	spanObserver             func(span trace.Span, r *http.Request)
 }
 
 // ClientOption contols the behavior of TraceRequest.
@@ -75,7 +77,7 @@ func InjectSpanContext(enabled bool) ClientOption {
 
 // ClientSpanObserver returns a ClientOption that observes the span
 // for the client-side span.
-func ClientSpanObserver(f func(span opentracing.Span, r *http.Request)) ClientOption {
+func ClientSpanObserver(f func(span trace.Span, r *http.Request)) ClientOption {
 	return func(options *clientOptions) {
 		options.spanObserver = f
 	}
@@ -87,33 +89,33 @@ func ClientSpanObserver(f func(span opentracing.Span, r *http.Request)) ClientOp
 //
 // Example:
 //
-//		func AskGoogle(ctx context.Context) error {
-//			client := &http.Client{Transport: &nethttp.Transport{}}
-//			req, err := http.NewRequest("GET", "http://google.com", nil)
-//			if err != nil {
-//				return err
-//			}
-//			req = req.WithContext(ctx) // extend existing trace, if any
+//	func AskGoogle(ctx context.Context) error {
+//	    client := &http.Client{Transport: &nethttp.Transport{}}
+//	    req, err := http.NewRequest("GET", "http://google.com", nil)
+//	    if err != nil {
+//	        return err
+//	    }
+//	    req = req.WithContext(ctx) // extend existing trace, if any
 //
-//			req, ht := nethttp.TraceRequest(tracer, req)
-//			defer ht.Finish()
+//	    req, ht := nethttp.TraceRequest(ctx, tracer, req)
+//	    defer ht.Finish()
 //
-//	     req = req.WithContext(ContextWithTracer(req.Context(), ht))
-//			res, err := client.Do(req)
-//			if err != nil {
-//				return err
-//			}
-//			res.Body.Close()
-//			return nil
-//		}
-func TraceRequest(ctx context.Context, tr opentracing.Tracer, req *http.Request, options ...ClientOption) (context.Context, *http.Request, *Tracer) {
+//	    req = req.WithContext(ContextWithTracer(req.Context(), ht))
+//	    res, err := client.Do(req)
+//	    if err != nil {
+//	        return err
+//	    }
+//	    res.Body.Close()
+//	    return nil
+//	}
+func TraceRequest(ctx context.Context, tp trace.TracerProvider, req *http.Request, options ...ClientOption) (context.Context, *http.Request, *Tracer) {
 	opts := &clientOptions{
-		spanObserver: func(_ opentracing.Span, _ *http.Request) {},
+		spanObserver: func(_ trace.Span, _ *http.Request) {},
 	}
 	for _, opt := range options {
 		opt(opts)
 	}
-	ht := &Tracer{tr: tr, opts: opts}
+	ht := &Tracer{tp: tp, opts: opts}
 	if !opts.disableClientTrace {
 		if ctx == nil {
 			ctx = context.Background()
@@ -125,13 +127,13 @@ func TraceRequest(ctx context.Context, tr opentracing.Tracer, req *http.Request,
 
 type closeTracker struct {
 	io.ReadCloser
-	sp opentracing.Span
+	sp trace.Span
 }
 
 func (c closeTracker) Close() error {
 	err := c.ReadCloser.Close()
-	c.sp.LogFields(log.String("event", "ClosedBody"))
-	c.sp.Finish()
+	c.sp.AddEvent("ClosedBody")
+	c.sp.End()
 	return err
 }
 
@@ -165,7 +167,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := rt.RoundTrip(req)
 
 	if err != nil {
-		tracer.sp.Finish()
+		tracer.sp.End()
 		return resp, err
 	}
 
@@ -175,56 +177,60 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // Tracer holds tracing details for one HTTP request.
 type Tracer struct {
-	tr   opentracing.Tracer
-	root opentracing.Span
-	sp   opentracing.Span
+	tp   trace.TracerProvider
+	root trace.Span
+	sp   trace.Span
 	opts *clientOptions
 }
 
-func (h *Tracer) Start(req *http.Request) opentracing.Span {
+func (h *Tracer) Start(req *http.Request) trace.Span {
 	if h.root == nil {
-		parent := opentracing.SpanFromContext(req.Context())
-		var spanctx opentracing.SpanContext
-		if parent != nil {
-			spanctx = parent.Context()
-		}
 		operationName := h.opts.operationName
 		if operationName == "" {
 			operationName = "HTTP Client"
 		}
-		root := h.tr.StartSpan(operationName, opentracing.ChildOf(spanctx))
-		h.root = root
+		tr := h.tp.Tracer("resty")
+		ctx := req.Context()
+		var span trace.Span
+		ctx, span = tr.Start(ctx, operationName)
+		h.root = span
+		req = req.WithContext(ctx)
 	}
 
-	ctx := h.root.Context()
-	h.sp = h.tr.StartSpan("HTTP "+req.Method, opentracing.ChildOf(ctx))
-	ext.SpanKindRPCClient.Set(h.sp)
+	tr := h.tp.Tracer("resty")
+	ctx := req.Context()
+	operationName := "HTTP " + req.Method
+	ctx, span := tr.Start(ctx, operationName, trace.WithSpanKind(trace.SpanKindClient))
+	h.sp = span
 
 	componentName := h.opts.componentName
 	if componentName == "" {
 		componentName = defaultComponentName
 	}
-	ext.Component.Set(h.sp, componentName)
-
-	ext.HTTPMethod.Set(h.sp, req.Method)
-	ext.HTTPUrl.Set(h.sp, req.URL.String())
+	h.sp.SetAttributes(
+		attribute.String("component", componentName),
+		attribute.String("http.method", req.Method),
+		attribute.String("http.url", req.URL.String()),
+	)
 	h.opts.spanObserver(h.sp, req)
 
 	if !h.opts.disableInjectSpanContext {
-		carrier := opentracing.HTTPHeadersCarrier(req.Header)
-		h.sp.Tracer().Inject(h.sp.Context(), opentracing.HTTPHeaders, carrier)
+		propagator := otel.GetTextMapPropagator()
+		propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
 	}
 
 	return h.sp
 }
 
 func (h *Tracer) Stop(resp *http.Response) {
-	ext.HTTPStatusCode.Set(h.sp, uint16(resp.StatusCode))
+	h.sp.SetAttributes(
+		attribute.Int("http.status_code", resp.StatusCode),
+	)
 	if resp.StatusCode >= http.StatusInternalServerError {
-		ext.Error.Set(h.sp, true)
+		h.sp.SetStatus(codes.Error, "HTTP Error")
 	}
 	if resp.Body == nil {
-		h.sp.Finish()
+		h.sp.End()
 	} else {
 		resp.Body = closeTracker{resp.Body, h.sp}
 	}
@@ -233,13 +239,13 @@ func (h *Tracer) Stop(resp *http.Response) {
 // Finish finishes the span of the traced request.
 func (h *Tracer) Finish() {
 	if h.root != nil {
-		h.root.Finish()
+		h.root.End()
 	}
 }
 
 // Span returns the root span of the traced request. This function
 // should only be called after the request has been executed.
-func (h *Tracer) Span() opentracing.Span {
+func (h *Tracer) Span() trace.Span {
 	return h.root
 }
 
@@ -261,89 +267,84 @@ func (h *Tracer) clientTrace() *httptrace.ClientTrace {
 }
 
 func (h *Tracer) getConn(hostPort string) {
-	ext.HTTPUrl.Set(h.sp, hostPort)
-	h.sp.LogFields(log.String("event", "GetConn"))
+	h.sp.SetAttributes(attribute.String("http.url", hostPort))
+	h.sp.AddEvent("GetConn")
 }
 
 func (h *Tracer) gotConn(info httptrace.GotConnInfo) {
-	h.sp.SetTag("net/http.reused", info.Reused)
-	h.sp.SetTag("net/http.was_idle", info.WasIdle)
-	h.sp.LogFields(log.String("event", "GotConn"))
+	h.sp.SetAttributes(
+		attribute.Bool("net/http.reused", info.Reused),
+		attribute.Bool("net/http.was_idle", info.WasIdle),
+	)
+	h.sp.AddEvent("GotConn")
 }
 
 func (h *Tracer) putIdleConn(error) {
-	h.sp.LogFields(log.String("event", "PutIdleConn"))
+	h.sp.AddEvent("PutIdleConn")
 }
 
 func (h *Tracer) gotFirstResponseByte() {
-	h.sp.LogFields(log.String("event", "GotFirstResponseByte"))
+	h.sp.AddEvent("GotFirstResponseByte")
 }
 
 func (h *Tracer) got100Continue() {
-	h.sp.LogFields(log.String("event", "Got100Continue"))
+	h.sp.AddEvent("Got100Continue")
 }
 
 func (h *Tracer) dnsStart(info httptrace.DNSStartInfo) {
-	h.sp.LogFields(
-		log.String("event", "DNSStart"),
-		log.String("host", info.Host),
-	)
+	h.sp.AddEvent("DNSStart", trace.WithAttributes(
+		attribute.String("host", info.Host),
+	))
 }
 
 func (h *Tracer) dnsDone(info httptrace.DNSDoneInfo) {
-	fields := []log.Field{log.String("event", "DNSDone")}
+	attrs := []attribute.KeyValue{}
 	for _, addr := range info.Addrs {
-		fields = append(fields, log.String("addr", addr.String()))
+		attrs = append(attrs, attribute.String("addr", addr.String()))
 	}
 	if info.Err != nil {
-		fields = append(fields, log.Error(info.Err))
+		attrs = append(attrs, attribute.String("error", info.Err.Error()))
+		h.sp.SetStatus(codes.Error, info.Err.Error())
 	}
-	h.sp.LogFields(fields...)
+	h.sp.AddEvent("DNSDone", trace.WithAttributes(attrs...))
 }
 
 func (h *Tracer) connectStart(network, addr string) {
-	h.sp.LogFields(
-		log.String("event", "ConnectStart"),
-		log.String("network", network),
-		log.String("addr", addr),
-	)
+	h.sp.AddEvent("ConnectStart", trace.WithAttributes(
+		attribute.String("network", network),
+		attribute.String("addr", addr),
+	))
 }
 
 func (h *Tracer) connectDone(network, addr string, err error) {
+	attrs := []attribute.KeyValue{
+		attribute.String("network", network),
+		attribute.String("addr", addr),
+	}
 	if err != nil {
-		h.sp.LogFields(
-			log.String("message", "ConnectDone"),
-			log.String("network", network),
-			log.String("addr", addr),
-			log.String("event", "error"),
-			log.Error(err),
-		)
+		attrs = append(attrs, attribute.String("error", err.Error()))
+		h.sp.SetStatus(codes.Error, err.Error())
+		h.sp.AddEvent("ConnectDone", trace.WithAttributes(attrs...))
 	} else {
-		h.sp.LogFields(
-			log.String("event", "ConnectDone"),
-			log.String("network", network),
-			log.String("addr", addr),
-		)
+		h.sp.AddEvent("ConnectDone", trace.WithAttributes(attrs...))
 	}
 }
 
 func (h *Tracer) wroteHeaders() {
-	h.sp.LogFields(log.String("event", "WroteHeaders"))
+	h.sp.AddEvent("WroteHeaders")
 }
 
 func (h *Tracer) wait100Continue() {
-	h.sp.LogFields(log.String("event", "Wait100Continue"))
+	h.sp.AddEvent("Wait100Continue")
 }
 
 func (h *Tracer) wroteRequest(info httptrace.WroteRequestInfo) {
 	if info.Err != nil {
-		h.sp.LogFields(
-			log.String("message", "WroteRequest"),
-			log.String("event", "error"),
-			log.Error(info.Err),
-		)
-		ext.Error.Set(h.sp, true)
+		h.sp.SetStatus(codes.Error, info.Err.Error())
+		h.sp.AddEvent("WroteRequest", trace.WithAttributes(
+			attribute.String("error", info.Err.Error()),
+		))
 	} else {
-		h.sp.LogFields(log.String("event", "WroteRequest"))
+		h.sp.AddEvent("WroteRequest")
 	}
 }
