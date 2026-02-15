@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/runner-mei/errors"
 	"github.com/runner-mei/resty/tracing"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -170,7 +170,7 @@ func NewWith(u *url.URL) (*Proxy, error) {
 }
 
 type Proxy struct {
-	Tracer        opentracing.Tracer
+	Tracer        trace.TracerProvider
 	traceOptions  []tracing.ClientOption
 	MemoryPool    MemoryPool
 	Client        *http.Client
@@ -221,7 +221,7 @@ func (px *Proxy) SetTraceFunc(trace func(*http.Client, *http.Request) (*http.Res
 	return px
 }
 
-func (px *Proxy) SetTracer(tracer opentracing.Tracer, traceOptions ...tracing.ClientOption) *Proxy {
+func (px *Proxy) SetTracer(tracer trace.TracerProvider, traceOptions ...tracing.ClientOption) *Proxy {
 	px.Tracer = tracer
 	px.traceOptions = traceOptions
 
@@ -342,7 +342,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 }
 
 type Request struct {
-	tracer        opentracing.Tracer
+	tracer        trace.TracerProvider
 	traceOptions  []tracing.ClientOption
 	proxy         *Proxy
 	memoryPool    MemoryPool
@@ -453,7 +453,7 @@ func (r *Request) SetWrapFunc(wrapResult func(body interface{}) ResponseFunc) *R
 	r.wrapResult = wrapResult
 	return r
 }
-func (r *Request) SetTracer(tracer opentracing.Tracer, traceOptions ...tracing.ClientOption) *Request {
+func (r *Request) SetTracer(tracer trace.TracerProvider, traceOptions ...tracing.ClientOption) *Request {
 	r.tracer = tracer
 	r.traceOptions = traceOptions
 	if len(r.traceOptions) == 0 {
