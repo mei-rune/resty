@@ -121,6 +121,7 @@ func AsHTTPError(err error) (HTTPError, bool) {
 var DefaultTraceOptions = []tracing.ClientOption{
 	tracing.ClientTrace(false),
 	tracing.InjectSpanContext(true),
+	tracing.WithPropagator(tracing.NewDefaultPropagator()),
 }
 var TimeFormat = time.RFC3339
 

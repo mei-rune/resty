@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -36,10 +37,26 @@ type clientOptions struct {
 	disableClientTrace       bool
 	disableInjectSpanContext bool
 	spanObserver             func(span trace.Span, r *http.Request)
+	propagator  propagation.TextMapPropagator
+}
+
+func NewDefaultPropagator() propagation.TextMapPropagator {
+	return propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{}, // W3C Trace Context 标准
+		propagation.Baggage{},      // Baggage 传播
+	)
 }
 
 // ClientOption contols the behavior of TraceRequest.
 type ClientOption func(*clientOptions)
+
+// WithPropagator returns a ClientOption that sets the operation
+// name for the client-side span.
+func WithPropagator(propagator propagation.TextMapPropagator) ClientOption {
+	return func(options *clientOptions) {
+		options.propagator = propagator
+	}
+}
 
 // OperationName returns a ClientOption that sets the operation
 // name for the client-side span.
@@ -215,8 +232,18 @@ func (h *Tracer) Start(req *http.Request) trace.Span {
 	h.opts.spanObserver(h.sp, req)
 
 	if !h.opts.disableInjectSpanContext {
-		propagator := otel.GetTextMapPropagator()
-		propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
+		fmt.Println("====================== inject")
+		if h.opts.propagator != nil {
+			h.opts.propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
+		} else {
+			propagator := otel.GetTextMapPropagator()
+			propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
+		}
+
+		fmt.Println("====================== inject end")
+		for key, value := range req.Header {
+			fmt.Println("======", key, value)
+		}
 	}
 
 	return h.sp
