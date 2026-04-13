@@ -643,10 +643,19 @@ func (r *Request) SetBody(body interface{}) *Request {
 	return r
 }
 func (r *Request) Result(body interface{}) *Request {
-	if r.wrapResult != nil {
-		r.responseBody = r.wrapResult(body)
-	} else {
+	switch body.(type) {
+	case *string:
 		r.responseBody = body
+	case *[]byte:
+		r.responseBody = body
+	case io.Writer:
+		r.responseBody = body
+	default:
+		if r.wrapResult != nil {
+			r.responseBody = r.wrapResult(body)
+		} else {
+			r.responseBody = body
+		}
 	}
 	return r
 }
