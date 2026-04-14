@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -37,7 +36,7 @@ type clientOptions struct {
 	disableClientTrace       bool
 	disableInjectSpanContext bool
 	spanObserver             func(span trace.Span, r *http.Request)
-	propagator  propagation.TextMapPropagator
+	propagator               propagation.TextMapPropagator
 }
 
 func NewDefaultPropagator() propagation.TextMapPropagator {
