@@ -232,7 +232,7 @@ func (h *Tracer) Start(req *http.Request) trace.Span {
 	h.opts.spanObserver(h.sp, req)
 
 	if !h.opts.disableInjectSpanContext {
-		fmt.Println("====================== inject")
+		// fmt.Println("====================== inject")
 		if h.opts.propagator != nil {
 			h.opts.propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
 		} else {
@@ -240,10 +240,10 @@ func (h *Tracer) Start(req *http.Request) trace.Span {
 			propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
 		}
 
-		fmt.Println("====================== inject end")
-		for key, value := range req.Header {
-			fmt.Println("======", key, value)
-		}
+		// fmt.Println("====================== inject end")
+		// for key, value := range req.Header {
+		// 	fmt.Println("======", key, value)
+		// }
 	}
 
 	return h.sp
