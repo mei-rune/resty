@@ -16,8 +16,8 @@ import (
 
 	// "github.com/runner-mei/errors"
 	"github.com/runner-mei/resty/tracing"
-	"golang.org/x/exp/errors"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/errors"
 )
 
 const (
@@ -645,10 +645,10 @@ func (r *Request) SetBody(body interface{}) *Request {
 }
 func (r *Request) Result(body interface{}) *Request {
 	switch body.(type) {
-	case *string:
-		r.responseBody = body
-	case *[]byte:
-		r.responseBody = body
+	// case *string:
+	// 	r.responseBody = body
+	// case *[]byte:
+	// 	r.responseBody = body
 	case io.Writer:
 		r.responseBody = body
 	default:
@@ -832,12 +832,21 @@ func (r *Request) invoke(ctx context.Context, method string) HTTPError {
 
 	// Install closing the request body (if any)
 	bodyCloser := resp.Body
+
 	defer func() {
 		if bodyCloser != nil {
 			io.Copy(ioutil.Discard, bodyCloser)
 			bodyCloser.Close()
 		}
 	}()
+
+	// if true {
+	// 	if bodyCloser != nil {
+	// 		out := io.TeeReader(bodyCloser, os.Stderr)
+	// 		bodyCloser = io.NopCloser(out)
+	//    resp.Body = bodyCloser
+	// 	}
+	// }
 
 	if !isOK {
 		if r.errorFunc != nil {
