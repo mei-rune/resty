@@ -126,8 +126,8 @@ var DefaultTraceOptions = []tracing.ClientOption{
 var TimeFormat = time.RFC3339
 
 var (
-	ErrNoContent = WithHTTPCode(errors.New("no content"), http.StatusNoContent*1000+001)
-	ErrReadResponseFail = WithHTTPCode(errors.New("read response error"), 560011)
+	ErrNoContent             = WithHTTPCode(errors.New("no content"), http.StatusNoContent*1000+001)
+	ErrReadResponseFail      = WithHTTPCode(errors.New("read response error"), 560011)
 	ErrUnmarshalResponseFail = WithHTTPCode(errors.New("unmarshal response error"), 560012)
 )
 
@@ -644,19 +644,19 @@ func (r *Request) SetBody(body interface{}) *Request {
 	return r
 }
 func (r *Request) Result(body interface{}) *Request {
-	switch body.(type) {
-	// case *string:
-	// 	r.responseBody = body
-	// case *[]byte:
-	// 	r.responseBody = body
-	case io.Writer:
-		r.responseBody = body
-	default:
-		if r.wrapResult != nil {
-			r.responseBody = r.wrapResult(body)
-		} else {
+	if r.wrapResult != nil {
+		switch body.(type) {
+		// case *string:
+		// 	r.responseBody = body
+		// case *[]byte:
+		// 	r.responseBody = body
+		case io.Writer:
 			r.responseBody = body
+		default:
+			r.responseBody = r.wrapResult(body)
 		}
+	} else {
+		r.responseBody = body
 	}
 	return r
 }
