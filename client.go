@@ -267,7 +267,7 @@ func (px *Proxy) Clone() *Proxy {
 	return copyed
 }
 func (px *Proxy) Join(urlStr ...string) *Proxy {
-	px.u.Path = JoinWith(px.u.Path, urlStr)
+	px.u.Path = JoinWith(px.u.Path, unescapePaths(urlStr...))
 	return px
 }
 
@@ -386,10 +386,13 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 				r.queryParams[key] = values
 			}
 
-			r.u.Path = JoinWith(r.u.Path, urlStr[1:])
+			r.u.Path = JoinWith(r.u.Path, unescapePaths(urlStr[1:]...))
 		} else {
 			if u.RawQuery == "" && u.Fragment == "" {
-				r.u.Path = JoinWith(r.u.Path, urlStr)
+				// urlStr 里可能已经带转义了（调用方常用 url.PathEscape 拼路径），
+				// 直接拼进 Path 会被再转义一次（%28 变成 %2528），所以用解出来的 u.Path
+				r.u.Path = Join(r.u.Path, u.Path)
+				r.u.Path = JoinWith(r.u.Path, unescapePaths(urlStr[1:]...))
 			} else {
 
 				for key, values := range u.Query() {
@@ -399,7 +402,7 @@ func (proxy *Proxy) New(urlStr ...string) *Request {
 					r.u.Fragment = u.Fragment
 				}
 				r.u.Path = Join(r.u.Path, u.Path)
-				r.u.Path = JoinWith(r.u.Path, urlStr[1:])
+				r.u.Path = JoinWith(r.u.Path, unescapePaths(urlStr[1:]...))
 			}
 		}
 	}
@@ -511,7 +514,7 @@ func (r *Request) RequestURL() string {
 	return r.u.String()
 }
 func (r *Request) JoinURL(urlStr ...string) *Request {
-	r.u.Path = JoinWith(r.u.Path, urlStr)
+	r.u.Path = JoinWith(r.u.Path, unescapePaths(urlStr...))
 	return r
 }
 func (r *Request) SetWrapFunc(wrapResult func(body interface{}) ResponseFunc) *Request {
@@ -956,6 +959,21 @@ func Join(paths ...string) string {
 	default:
 		return JoinWith(paths[0], paths[1:])
 	}
+}
+
+// unescapePaths 把可能已经转过义的路径段解成未转义的形式，
+// 也就是 url.URL.Path 要的形式：url.URL.String() 会按 Path 再转义一次，
+// 所以直接把原串拼进 Path 会被转义两次（%28 变成 %2528）。
+func unescapePaths(paths ...string) []string {
+	rst := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if unescaped, err := url.PathUnescape(path); err == nil {
+			rst = append(rst, unescaped)
+		} else {
+			rst = append(rst, path)
+		}
+	}
+	return rst
 }
 
 // JoinWith 拼接 url

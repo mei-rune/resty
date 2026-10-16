@@ -475,3 +475,80 @@ func TestProxyData(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestProxyNewEscapedPath(t *testing.T) {
+	for _, c := range []struct {
+		name         string
+		path         string
+		exceptedURL  string
+		exceptedPath string
+	}{
+		{
+			name:         "没转义的路径",
+			path:         "/requests/report/by/created_at(1m)",
+			exceptedURL:  "/api/v3/requests/report/by/created_at%281m%29",
+			exceptedPath: "/api/v3/requests/report/by/created_at(1m)",
+		},
+		{
+			name:         "已经 url.PathEscape 过的路径",
+			path:         "/requests/report/by/" + url.PathEscape("created_at(1m)"),
+			exceptedURL:  "/api/v3/requests/report/by/created_at%281m%29",
+			exceptedPath: "/api/v3/requests/report/by/created_at(1m)",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var actualURL, actualPath string
+			hsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				actualURL, actualPath = r.URL.String(), r.URL.Path
+				w.Write([]byte("OK"))
+			}))
+			defer hsrv.Close()
+
+			prx, err := New(Join(hsrv.URL, "/api/v3"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err = prx.New(c.path).GET(nil); err != nil {
+				t.Error(err)
+			}
+			if actualURL != c.exceptedURL {
+				t.Error("url excepted:", c.exceptedURL)
+				t.Error("url actual  :", actualURL)
+			}
+			if actualPath != c.exceptedPath {
+				t.Error("path excepted:", c.exceptedPath)
+				t.Error("path actual  :", actualPath)
+			}
+		})
+	}
+}
+
+func TestJoinURLEscapedPath(t *testing.T) {
+	var actualURL, actualPath string
+	hsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		actualURL, actualPath = r.URL.String(), r.URL.Path
+		w.Write([]byte("OK"))
+	}))
+	defer hsrv.Close()
+
+	prx, err := New(Join(hsrv.URL, "/api/v3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = prx.New("/requests").
+		JoinURL("/report/by/"+url.PathEscape("created_at(1m)")).
+		GET(nil)
+	if err != nil {
+		t.Error(err)
+	}
+	if excepted := "/api/v3/requests/report/by/created_at%281m%29"; actualURL != excepted {
+		t.Error("url excepted:", excepted)
+		t.Error("url actual  :", actualURL)
+	}
+	if excepted := "/api/v3/requests/report/by/created_at(1m)"; actualPath != excepted {
+		t.Error("path excepted:", excepted)
+		t.Error("path actual  :", actualPath)
+	}
+}
